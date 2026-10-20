@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HTML-DOS Tests</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { background: #000; color: #aaa; font: 14px/1.4 "Lucida Console", Consolas, monospace; padding: 16px; }
+    .pass { color: #5f5; } .fail { color: #f55; white-space: pre-wrap; }
+    h1 { color: #fff; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <h1>HTML-DOS unit tests</h1>
+  <div id="out" role="log" aria-live="polite"></div>
+  <script src="../js/font.js"></script>
+  <script src="../js/terminal.js"></script>
+  <script src="../js/input.js"></script>
+  <script src="../js/filesystem.js"></script>
+  <script src="../js/disk-image.js"></script>
+  <script src="../js/parser.js"></script>
+  <script src="../js/batch.js"></script>
+  <script src="../js/commands.js"></script>
+  <script src="../js/graphics.js"></script>
+  <script src="../js/audio.js"></script>
+  <script src="../js/programs.js"></script>
+  <script src="../js/mario-data.js"></script>
+  <script src="../js/mario.js"></script>
+  <script src="../js/machine.js"></script>
+  <script src="harness.js"></script>
+  <script src="tests.js"></script>
+  <script>
+    const out = document.getElementById('out');
+    TestHarness.run((msg, cls) => {
+      const div = document.createElement('div');
+      div.className = cls || '';
+      div.textContent = msg;
+      out.appendChild(div);
+    }, new URLSearchParams(location.search).get('filter') || '').then(r => { document.title = `${r.failed ? 'FAIL' : 'PASS'} ${r.passed}/${r.passed + r.failed}`; });
+  </script>
+</body>
+</html>
