@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<!--
+  HTML-DOS 6.22 —— 基于 HTML5 的 MS-DOS 仿真模拟器
+  ================================================================
+  纯原生 HTML5 / CSS / JavaScript，无第三方库，可直接用浏览器打开本文件，
+  或通过 GitHub Pages 访问。
+
+  模块（js/ 目录，均挂在全局 DOS 命名空间下，状态集中在 DOS.Machine）：
+    1. Terminal    terminal.js   文本渲染（80×25、16 色、9×16 字符单元）与滚动缓冲
+    2. Input       input.js      键盘事件、行编辑、命令历史、Tab 补全、按键状态
+    3. FileSystem  filesystem.js 虚拟磁盘、路径解析、localStorage 持久化
+                   disk-image.js 出厂磁盘内容
+    4. Parser      parser.js     命令行解析；batch.js 批处理解释器
+    5. Commands    commands.js   表驱动的内置命令注册表
+    6. Graphics    graphics.js   Mode 13h 帧缓冲、调色板、绘图原语、双缓冲
+    7. Audio       audio.js      BEEP、马里奥音效与音乐合成（Web Audio）
+    8. Programs    programs.js   外部程序注册表（PLASMA、BALL、MARIO …）
+    9. MarioGame   mario.js      马里奥状态/物理/渲染；mario-data.js 精灵与关卡数据
+       Machine     machine.js    集中状态、执行管线、外壳循环、BIOS 自检
+       main.js                   浏览器接线（布局、渲染循环、工具栏、无障碍）
+
+  免责声明：MARIO.COM 是致敬 NES《超级马里奥兄弟》(1985) 1-1 关卡的非商业
+  原创实现，所有像素图与音符均为原创，未使用任何 ROM 或受版权保护的素材文件，
+  与任天堂（Nintendo）无任何关联，也未获其认可。MS-DOS 是 Microsoft 的商标，
+  本项目同样与 Microsoft 无关联。
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="An MS-DOS style command line, Mode 13h graphics and a World 1-1 tribute platformer in pure HTML5.">
+  <title>HTML-DOS 6.22</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Ctext x='1' y='12' font-family='monospace' font-size='11' fill='%23aaa'%3EC%3E%3C/text%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #1b1d22;
+      --bar: #26292f;
+      --bar-fg: #c9ccd2;
+      --accent: #55ffff;
+      --bezel: #2d2a26;
+      --bezel-edge: #4a453e;
+      --panel: #000080;
+      --panel-fg: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--bar-fg);
+      font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      overflow-x: auto;
+      overflow-y: auto;
+      min-width: 680px;
+    }
+    .toolbar {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 6px 12px; background: var(--bar); border-bottom: 1px solid #000;
+    }
+    .toolbar .brand { font-weight: 700; letter-spacing: .04em; margin-right: auto; color: #fff; }
+    .toolbar .brand small { font-weight: 400; color: #9aa0a8; margin-left: 6px; }
+    .toolbar button {
+      font: inherit; color: var(--bar-fg); background: #33373e; border: 1px solid #4b5059;
+      border-radius: 4px; padding: 3px 10px; cursor: pointer;
+    }
+    .toolbar button:hover { background: #3d424a; }
+    .toolbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .stage { display: flex; justify-content: center; padding: 12px; }
+    .monitor {
+      padding: 18px; border-radius: 18px; outline: none;
+      background: linear-gradient(160deg, var(--bezel-edge), var(--bezel) 40%, #1e1c19);
+      box-shadow: 0 12px 40px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08);
+    }
+    .monitor:focus-visible { box-shadow: 0 0 0 2px var(--accent), 0 12px 40px rgba(0,0,0,.6); }
+    .screen { position: relative; overflow: hidden; background: #000; border-radius: 4px; }
+    .monitor.crt .screen { border-radius: 14px / 12px; }
+    .screen canvas { position: absolute; left: 0; top: 0; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+    .screen canvas[hidden] { display: none; }
+    #glow-canvas { display: none; pointer-events: none; mix-blend-mode: screen; opacity: .45; filter: blur(3px) brightness(1.2); }
+    .monitor.crt #glow-canvas { display: block; }
+    .scanlines { position: absolute; inset: 0; pointer-events: none; display: none; }
+    .monitor.crt .scanlines {
+      display: block;
+      background:
+        repeating-linear-gradient(to bottom, rgba(0,0,0,.28) 0, rgba(0,0,0,.28) 1px, transparent 1px, transparent 3px),
+        radial-gradient(ellipse at center, transparent 62%, rgba(0,0,0,.45) 100%);
+      animation: flicker 6s infinite steps(60);
+    }
+    @keyframes flicker { 0%, 100% { opacity: .95; } 50% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .monitor.crt .scanlines { animation: none; } }
+    .help {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.6); z-index: 10;
+    }
+    .help[hidden] { display: none; }
+    .help .box {
+      background: var(--panel); color: var(--panel-fg); border: 3px double #fff;
+      font: 15px/1.35 "Lucida Console", Consolas, "DejaVu Sans Mono", monospace;
+      padding: 14px 20px 16px; max-width: 760px; width: calc(100% - 32px); max-height: calc(100% - 32px); overflow: auto;
+      box-shadow: 8px 8px 0 #000;
+    }
+    .help h2 { margin: 0 0 8px; font-size: 16px; text-align: center; background: #aaa; color: #000; }
+    .help h3 { margin: 12px 0 4px; font-size: 15px; color: #ffff55; }
+    .help table { border-collapse: collapse; width: 100%; }
+    .help td { padding: 1px 8px 1px 0; vertical-align: top; }
+    .help td:first-child { color: #55ffff; white-space: nowrap; width: 34%; }
+    .help .close { display: block; margin: 12px auto 0; font: inherit; background: #aaa; color: #000; border: 0; padding: 2px 16px; cursor: pointer; }
+    .help .close:focus-visible { outline: 2px solid #ffff55; }
+    .help p { margin: 8px 0 0; color: #ccc; font-size: 13px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    noscript { display: block; padding: 20px; color: #fff; }
+  </style>
+</head>
+<body>
+  <header class="toolbar" role="toolbar" aria-label="Simulator settings">
+    <span class="brand">HTML-DOS 6.22 <small>MS-DOS style simulator</small></span>
+    <button type="button" id="btn-theme">Theme</button>
+    <button type="button" id="btn-crt" aria-pressed="true">CRT: On</button>
+    <button type="button" id="btn-help" aria-haspopup="dialog">Help (F12)</button>
+    <button type="button" id="btn-reset" title="Erase virtual disks and settings">Factory reset</button>
+  </header>
+  <main class="stage">
+    <div class="monitor crt" id="monitor" tabindex="0" role="application" aria-label="DOS screen. Type commands and press Enter. Press F12 for help." aria-describedby="sr-live">
+      <div class="screen" id="screen">
+        <canvas id="text-canvas" width="720" height="400"></canvas>
+        <canvas id="gfx-canvas" width="320" height="200" hidden></canvas>
+        <canvas id="glow-canvas" aria-hidden="true"></canvas>
+        <div class="scanlines" aria-hidden="true"></div>
+      </div>
+    </div>
+  </main>
+  <noscript>HTML-DOS needs JavaScript.</noscript>
+
+  <div class="help" id="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title" hidden>
+    <div class="box">
+      <h2 id="help-title">HTML-DOS Keyboard Shortcuts</h2>
+      <h3>Command line</h3>
+      <table>
+        <tr><td>Left / Right</td><td>Move the cursor (Ctrl = by word)</td></tr>
+        <tr><td>Home / End</td><td>Jump to start / end of the line</td></tr>
+        <tr><td>Backspace / Delete</td><td>Delete before / under the cursor</td></tr>
+        <tr><td>Insert</td><td>Toggle insert (block cursor) / overwrite (underline)</td></tr>
+        <tr><td>Up / Down</td><td>Browse command history (100 entries)</td></tr>
+        <tr><td>F1 / F3</td><td>Copy one character / the rest of the previous command</td></tr>
+        <tr><td>Tab / Shift+Tab</td><td>Complete command and file names (press again to cycle)</td></tr>
+        <tr><td>Esc</td><td>Clear the current line</td></tr>
+        <tr><td>Ctrl+C</td><td>Abort the command or batch file</td></tr>
+        <tr><td>F6 or Ctrl+Z</td><td>End-of-file marker (for COPY CON)</td></tr>
+        <tr><td>Ctrl+L</td><td>Clear the screen</td></tr>
+        <tr><td>Shift+PgUp / PgDn</td><td>Scroll back through 1000 lines (or mouse wheel)</td></tr>
+        <tr><td>F12</td><td>Show / hide this panel</td></tr>
+      </table>
+      <h3>Graphics programs (PLASMA, BALL)</h3>
+      <table>
+        <tr><td>Esc</td><td>Return to the DOS prompt (screen is restored)</td></tr>
+        <tr><td>Arrows / Space / C</td><td>BALL: gravity / add ball / clear</td></tr>
+      </table>
+      <h3>MARIO</h3>
+      <table>
+        <tr><td>Left / Right, A / D</td><td>Walk</td></tr>
+        <tr><td>Down, S</td><td>Crouch / enter pipe</td></tr>
+        <tr><td>Z or Space</td><td>Jump (hold for a higher jump)</td></tr>
+        <tr><td>X or Shift</td><td>Run</td></tr>
+        <tr><td>Enter</td><td>Start / pause</td></tr>
+        <tr><td>Esc</td><td>Quit to DOS &nbsp;(MARIO /M = no music)</td></tr>
+      </table>
+      <p>MARIO.COM is an original, non-commercial tribute (own pixel art and music). It is not affiliated with Nintendo. MS-DOS is a trademark of Microsoft.</p>
+      <button type="button" class="close" id="help-close">Close (Esc)</button>
+    </div>
+  </div>
+
+  <div id="sr-live" class="sr-only" aria-live="polite" aria-atomic="false"></div>
+
+  <script src="js/font.js"></script>
+  <script src="js/terminal.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/filesystem.js"></script>
+  <script src="js/disk-image.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/batch.js"></script>
+  <script src="js/commands.js"></script>
+  <script src="js/graphics.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/programs.js"></script>
+  <script src="js/mario-data.js"></script>
+  <script src="js/mario.js"></script>
+  <script src="js/machine.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
