@@ -1,5 +1,5 @@
 /*
- * main.js —— 浏览器启动：DOM 连接、渲染循环、布局、工具栏、帮助面板、无障碍播报
+ * main.js —— 浏览器启动：DOM 连接、渲染循环、布局、顶栏、状态 HUD、指示灯、帮助面板、无障碍播报
  * ---------------------------------------------------------------
  * 只做“接线”，不保存业务状态：所有状态都在 Machine 实例中。
  */
@@ -52,9 +52,12 @@
 
     // ---------------- 布局：4:3 显示器，图形按整数倍缩放 ----------------
     function layout() {
-      const bar = document.querySelector('.toolbar').offsetHeight;
-      const availW = Math.min(root.innerWidth - 24, 1400);
-      const availH = root.innerHeight - bar - 40;
+      // 预留顶栏、显示器下巴（指示灯一栏）、状态 HUD 与边距
+      const bar = document.querySelector('.topbar').offsetHeight;
+      const chin = document.querySelector('.chin').offsetHeight;
+      const hud = $('hud').offsetHeight;
+      const availW = Math.min(root.innerWidth - 64, 1400);
+      const availH = root.innerHeight - bar - chin - hud - 96;
       let W = Math.max(640, Math.min(availW, availH * 4 / 3));
       W = Math.floor(W);
       const H = Math.floor(W * 3 / 4);
@@ -90,26 +93,28 @@
     m.onDisplayChange = onDisplayChange;
 
     // ---------------- 设置：主题、CRT ----------------
-    const themeNames = Object.keys(DOS.THEMES);
+    const swatches = Array.from(document.querySelectorAll('.swatch'));
     function applySettings() {
       textRenderer.setTheme(m.settings.theme);
       document.body.dataset.theme = m.settings.theme;
       screen.style.background = DOS.THEMES[textRenderer.themeName].palette[0];
       monitor.classList.toggle('crt', !!m.settings.crt);
-      $('btn-theme').textContent = 'Theme: ' + DOS.THEMES[textRenderer.themeName].name;
-      $('btn-crt').textContent = 'CRT: ' + (m.settings.crt ? 'On' : 'Off');
-      $('btn-crt').setAttribute('aria-pressed', String(!!m.settings.crt));
+      for (const b of swatches) b.setAttribute('aria-pressed', String(b.dataset.theme === textRenderer.themeName));
+      $('btn-crt').setAttribute('aria-checked', String(!!m.settings.crt));
       m.term.dirty = true;
     }
     m.onSettingsChange = applySettings;
 
     const refocus = () => monitor.focus({ preventScroll: true });
-    $('btn-theme').addEventListener('click', () => {
-      const i = themeNames.indexOf(m.settings.theme);
-      m.updateSettings({ theme: themeNames[(i + 1) % themeNames.length] });
+    for (const b of swatches) b.addEventListener('click', () => { m.updateSettings({ theme: b.dataset.theme }); refocus(); });
+    const toggleCrt = () => { m.updateSettings({ crt: !m.settings.crt }); refocus(); };
+    $('btn-crt').addEventListener('click', toggleCrt);
+    $('btn-degauss').addEventListener('click', toggleCrt);
+    $('btn-power').addEventListener('click', () => root.location.reload());
+    $('btn-auto').addEventListener('click', () => {
+      if (DOS.MarioProgram.toggleAuto) DOS.MarioProgram.toggleAuto();
       refocus();
     });
-    $('btn-crt').addEventListener('click', () => { m.updateSettings({ crt: !m.settings.crt }); refocus(); });
     $('btn-help').addEventListener('click', () => { toggleHelp(); });
     $('btn-reset').addEventListener('click', () => {
       if (!root.confirm('Erase the virtual disks, settings and high score, then reboot?')) { refocus(); return; }
@@ -123,6 +128,61 @@
       help.hidden = !show;
       if (show) $('help-close').focus(); else refocus();
     }
+
+    // ---------------- 指示灯与状态 HUD ----------------
+    const leds = {};
+    for (const el of document.querySelectorAll('.led')) leds[el.dataset.led] = el;
+    const ledTimers = {};
+    const flash = (name) => {
+      leds[name].classList.add('on');
+      clearTimeout(ledTimers[name]);
+      ledTimers[name] = setTimeout(() => leds[name].classList.remove('on'), 140);
+    };
+    m.fs.onActivity = (drive) => flash(drive === 'A' ? 'fdd' : 'hdd');
+
+    let caps = false;
+    const trackCaps = (e) => { if (e.getModifierState) caps = e.getModifierState('CapsLock'); };
+    root.addEventListener('keydown', trackCaps);
+    root.addEventListener('keyup', trackCaps);
+
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const setText = (id, text) => { const el = $(id); if (el.textContent !== text) el.textContent = text; };
+    let gameShown = false, lastFreeCheck = 0;
+    function updateHud() {
+      const g = DOS.MarioProgram.current;
+      setText('hud-mode', m.display === 'text' ? `TEXT ${m.term.cols}\u00D7${m.term.rows}`
+        : m.display === 'gfxconsole' ? 'VGA 13h \u00B7 40\u00D725'
+          : `VGA 13h \u00B7 ${m.gfx.width}\u00D7${m.gfx.height}`);
+      let cwd = '';
+      try { cwd = m.fs.getCwd(); } catch (e) { cwd = m.fs.curDrive + ':'; }
+      setText('hud-path', cwd.length > 22 ? '\u2026' + cwd.slice(-21) : cwd);
+      setText('hud-ins', m.input.insertMode ? 'INS' : 'OVR');
+      $('hud-ins').classList.toggle('on', m.input.insertMode);
+      $('hud-caps').classList.toggle('on', caps);
+      const d = m.now();
+      setText('hud-clock', `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`);
+      if (Date.now() - lastFreeCheck > 1000) {
+        lastFreeCheck = Date.now();
+        const u = m.fs.usage('C');
+        setText('hud-free', (u.free / 1048576).toFixed(1) + ' MB');
+        $('hud-meter').style.width = Math.max(1, Math.round(u.used / u.total * 100)) + '%';
+      }
+      // MARIO 运行时显示游戏面板
+      if (!!g !== gameShown) { gameShown = !!g; $('hud-game').classList.toggle('active', gameShown); layout(); }
+      leds.auto.classList.toggle('on', !!(g && g.autopilot));
+      if (g) {
+        setText('hud-score', String(g.score).padStart(6, '0'));
+        setText('hud-coins', pad2(g.coins));
+        setText('hud-lives', g.lives <= 5 ? '\u2665'.repeat(Math.max(0, g.lives)) || '\u2013' : '\u2665 \u00D7' + g.lives);
+        setText('hud-time', String(g.time).padStart(3, '0'));
+        $('btn-auto').setAttribute('aria-checked', String(!!g.autopilot));
+        const p = DOS.MarioProgram.pilot;
+        setText('hud-ai', g.autopilot && p
+          ? `A* ${p.stats.lastNodes} nodes \u00B7 ${p.stats.lastMs.toFixed(1)} ms\nplan ${p.plan.length} ticks \u00B7 ${p.stats.searches} searches`
+          : 'A* idle \u2014 press P');
+      }
+    }
+    setInterval(updateHud, 200);
 
     // ---------------- 全局热键 ----------------
     m.input.onAnyKey = () => DOS.Audio.unlock();
@@ -147,10 +207,14 @@
 
     // ---------------- 渲染循环 ----------------
     let lastBlink = null;
+    // 光晕：把画面缩到 1/4 分辨率，再由浏览器平滑放大，放大本身就是模糊；
+    // 比在全尺寸图层上用 CSS blur() 便宜得多（软件渲染下也能保持 60fps）
     const copyGlow = (src) => {
       if (!m.settings.crt) return;
-      if (glowCanvas.width !== src.width || glowCanvas.height !== src.height) { glowCanvas.width = src.width; glowCanvas.height = src.height; }
-      glowCtx.drawImage(src, 0, 0);
+      const w = Math.max(1, Math.round(src.width / 4)), h = Math.max(1, Math.round(src.height / 4));
+      if (glowCanvas.width !== w || glowCanvas.height !== h) { glowCanvas.width = w; glowCanvas.height = h; }
+      glowCtx.imageSmoothingEnabled = true;
+      glowCtx.drawImage(src, 0, 0, w, h);
     };
     m.gfx.onPresent = () => { if (m.display !== 'text') copyGlow(gfxCanvas); };
     function frame(t) {
@@ -173,6 +237,7 @@
 
     root.addEventListener('resize', layout);
     applySettings();
+    updateHud();
     onDisplayChange();
     refocus();
     root.requestAnimationFrame(frame);

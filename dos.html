@@ -15,7 +15,8 @@
     6. Graphics    graphics.js   Mode 13h 帧缓冲、调色板、绘图原语、双缓冲
     7. Audio       audio.js      BEEP、马里奥音效与音乐合成（Web Audio）
     8. Programs    programs.js   外部程序注册表（PLASMA、BALL、MARIO …）
-    9. MarioGame   mario.js      马里奥状态/物理/渲染；mario-data.js 精灵与关卡数据
+    9. MarioGame   mario.js      马里奥状态/物理/渲染；mario-data.js 精灵与关卡数据；
+                   mario-ai.js   自动通关（A* 前向模型规划，按 P 开关）
        Machine     machine.js    集中状态、执行管线、外壳循环、BIOS 自检
        main.js                   浏览器接线（布局、渲染循环、工具栏、无障碍）
 
@@ -33,63 +34,194 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Ctext x='1' y='12' font-family='monospace' font-size='11' fill='%23aaa'%3EC%3E%3C/text%3E%3C/svg%3E">
   <style>
     :root {
-      --bg: #1b1d22;
-      --bar: #26292f;
-      --bar-fg: #c9ccd2;
-      --accent: #55ffff;
-      --bezel: #2d2a26;
-      --bezel-edge: #4a453e;
+      --bg0: #0b0d12;
+      --bg1: #151925;
+      --glass: rgba(22, 27, 38, .78);
+      --glass-edge: rgba(120, 150, 200, .16);
+      --fg: #d7dce6;
+      --muted: #8b93a5;
+      --cyan: #55ffff;
+      --amber: #ffb000;
+      --green: #55ff55;
+      --magenta: #ff55ff;
+      --red: #ff5555;
+      --bezel-hi: #3a3631;
+      --bezel: #26231f;
+      --bezel-lo: #171512;
       --panel: #000080;
       --panel-fg: #ffffff;
+      --mono: "Cascadia Mono", "JetBrains Mono", Consolas, "DejaVu Sans Mono", "Lucida Console", monospace;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; }
+    html, body { margin: 0; min-height: 100%; }
     body {
-      background: var(--bg);
-      color: var(--bar-fg);
+      color: var(--fg);
       font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      overflow-x: auto;
-      overflow-y: auto;
       min-width: 680px;
+      overflow-x: auto;
+      background:
+        radial-gradient(1200px 600px at 50% -10%, rgba(85, 255, 255, .10), transparent 60%),
+        radial-gradient(900px 500px at 100% 100%, rgba(255, 85, 255, .07), transparent 60%),
+        linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px) 0 0 / 100% 24px,
+        linear-gradient(180deg, var(--bg1), var(--bg0));
+      background-attachment: fixed;
     }
-    .toolbar {
-      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-      padding: 6px 12px; background: var(--bar); border-bottom: 1px solid #000;
+    button { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+    /* ---------- 顶栏 ---------- */
+    .topbar {
+      position: sticky; top: 0; z-index: 5;
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 8px 16px;
+      background: var(--glass);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--glass-edge);
+      box-shadow: 0 6px 24px rgba(0,0,0,.35);
     }
-    .toolbar .brand { font-weight: 700; letter-spacing: .04em; margin-right: auto; color: #fff; }
-    .toolbar .brand small { font-weight: 400; color: #9aa0a8; margin-left: 6px; }
-    .toolbar button {
-      font: inherit; color: var(--bar-fg); background: #33373e; border: 1px solid #4b5059;
-      border-radius: 4px; padding: 3px 10px; cursor: pointer;
+    .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+    .brand .logo {
+      font: 700 13px/1 var(--mono); color: #000; background: var(--cyan);
+      padding: 6px 7px; border-radius: 6px; letter-spacing: .02em;
+      box-shadow: 0 0 14px rgba(85,255,255,.55), inset 0 -2px 0 rgba(0,0,0,.2);
     }
-    .toolbar button:hover { background: #3d424a; }
-    .toolbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    .stage { display: flex; justify-content: center; padding: 12px; }
+    .brand b { font-size: 15px; letter-spacing: .06em; color: #fff; }
+    .brand small { display: block; color: var(--muted); font-size: 11.5px; letter-spacing: .04em; }
+    .group { display: flex; align-items: center; gap: 6px; }
+    .group > .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .12em; margin-right: 2px; }
+    .swatch {
+      width: 26px; height: 26px; border-radius: 50%; cursor: pointer; padding: 0;
+      border: 2px solid rgba(255,255,255,.18); position: relative;
+      box-shadow: inset 0 0 0 3px #0b0d12;
+      transition: transform .12s, border-color .12s;
+    }
+    .swatch:hover { transform: translateY(-1px); }
+    .swatch[aria-pressed="true"] { border-color: #fff; box-shadow: inset 0 0 0 3px #0b0d12, 0 0 12px var(--glow, #fff); }
+    .swatch[data-theme="classic"] { background: linear-gradient(135deg, #aaaaaa 50%, #000 50%); --glow: #aaa; }
+    .swatch[data-theme="green"] { background: linear-gradient(135deg, #33ff66 50%, #001a08 50%); --glow: #33ff66; }
+    .swatch[data-theme="amber"] { background: linear-gradient(135deg, #ffb000 50%, #1a1000 50%); --glow: #ffb000; }
+    .swatch[data-theme="blue"] { background: linear-gradient(135deg, #ffffff 50%, #0000aa 50%); --glow: #5577ff; }
+    .switch {
+      display: inline-flex; align-items: center; gap: 8px; cursor: pointer; background: none; border: 0; padding: 2px 4px;
+      color: var(--fg); font-size: 12.5px;
+    }
+    .switch .track {
+      width: 38px; height: 20px; border-radius: 10px; background: #2a3040; border: 1px solid #3b4357; position: relative;
+      transition: background .15s;
+    }
+    .switch .track::after {
+      content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+      background: #9aa3b5; transition: transform .15s, background .15s;
+    }
+    .switch[aria-checked="true"] .track { background: rgba(85,255,255,.25); border-color: var(--cyan); }
+    .switch[aria-checked="true"] .track::after { transform: translateX(18px); background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+    .switch.amber[aria-checked="true"] .track { background: rgba(255,176,0,.25); border-color: var(--amber); }
+    .switch.amber[aria-checked="true"] .track::after { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+    .btn {
+      cursor: pointer; padding: 5px 12px; border-radius: 8px; font-size: 12.5px;
+      background: linear-gradient(180deg, #2b3242, #20263300); background-color: #222837;
+      border: 1px solid #3b4357; color: var(--fg);
+      transition: border-color .12s, box-shadow .12s;
+    }
+    .btn:hover { border-color: var(--cyan); box-shadow: 0 0 10px rgba(85,255,255,.25); }
+    .btn kbd { font: 11px var(--mono); color: var(--muted); margin-left: 4px; }
+    .btn.danger:hover { border-color: var(--red); box-shadow: 0 0 10px rgba(255,85,85,.3); }
+
+    /* ---------- 显示器 ---------- */
+    .stage { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px 12px 24px; }
     .monitor {
-      padding: 18px; border-radius: 18px; outline: none;
-      background: linear-gradient(160deg, var(--bezel-edge), var(--bezel) 40%, #1e1c19);
-      box-shadow: 0 12px 40px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08);
+      position: relative; padding: 20px 20px 0; border-radius: 22px; outline: none;
+      background:
+        linear-gradient(160deg, var(--bezel-hi), var(--bezel) 35%, var(--bezel-lo));
+      box-shadow:
+        0 30px 60px -20px rgba(0,0,0,.8), 0 0 0 1px rgba(0,0,0,.6),
+        inset 0 1px 0 rgba(255,255,255,.10), inset 0 -2px 6px rgba(0,0,0,.5);
     }
-    .monitor:focus-visible { box-shadow: 0 0 0 2px var(--accent), 0 12px 40px rgba(0,0,0,.6); }
-    .screen { position: relative; overflow: hidden; background: #000; border-radius: 4px; }
-    .monitor.crt .screen { border-radius: 14px / 12px; }
+    .monitor::before { /* 屏幕上方的环境光反射 */
+      content: ""; position: absolute; inset: 0; border-radius: 22px; pointer-events: none;
+      background: linear-gradient(180deg, rgba(255,255,255,.05), transparent 30%);
+    }
+    .monitor:focus-visible { box-shadow: 0 0 0 1px rgba(85,255,255,.35), 0 0 24px rgba(85,255,255,.12), 0 30px 60px -20px rgba(0,0,0,.8); }
+    .screen {
+      position: relative; overflow: hidden; background: #000; border-radius: 6px;
+      box-shadow: inset 0 0 0 3px #0a0a0a, 0 0 0 2px #0d0c0b, 0 0 30px rgba(0,0,0,.6);
+    }
+    .monitor.crt .screen { border-radius: 16px / 14px; }
     .screen canvas { position: absolute; left: 0; top: 0; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
     .screen canvas[hidden] { display: none; }
-    #glow-canvas { display: none; pointer-events: none; mix-blend-mode: screen; opacity: .45; filter: blur(3px) brightness(1.2); }
+    #glow-canvas { display: none; pointer-events: none; mix-blend-mode: screen; opacity: .55; image-rendering: auto; }
     .monitor.crt #glow-canvas { display: block; }
     .scanlines { position: absolute; inset: 0; pointer-events: none; display: none; }
     .monitor.crt .scanlines {
       display: block;
       background:
         repeating-linear-gradient(to bottom, rgba(0,0,0,.28) 0, rgba(0,0,0,.28) 1px, transparent 1px, transparent 3px),
-        radial-gradient(ellipse at center, transparent 62%, rgba(0,0,0,.45) 100%);
+        radial-gradient(ellipse at center, transparent 62%, rgba(0,0,0,.45) 100%),
+        linear-gradient(115deg, rgba(255,255,255,.045) 0%, transparent 28%);
       animation: flicker 6s infinite steps(60);
     }
     @keyframes flicker { 0%, 100% { opacity: .95; } 50% { opacity: 1; } }
-    @media (prefers-reduced-motion: reduce) { .monitor.crt .scanlines { animation: none; } }
+
+    .chin { display: flex; align-items: center; gap: 18px; padding: 12px 6px 14px; }
+    .plate {
+      font: 700 12px/1 var(--mono); letter-spacing: .28em; color: #b9b1a3;
+      text-shadow: 0 1px 0 rgba(0,0,0,.8), 0 -1px 0 rgba(255,255,255,.08);
+    }
+    .plate small { display: block; font-weight: 400; font-size: 9px; letter-spacing: .3em; color: #7c766c; margin-top: 4px; }
+    .leds { display: flex; gap: 16px; margin-left: auto; }
+    .led { display: flex; align-items: center; gap: 6px; font: 10px/1 var(--mono); letter-spacing: .14em; color: #8a8477; }
+    .led i {
+      width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+      background: #2a2724; box-shadow: inset 0 1px 1px rgba(0,0,0,.8);
+      transition: background .08s, box-shadow .08s;
+    }
+    .led.on i { background: var(--c); box-shadow: 0 0 6px var(--c), 0 0 14px var(--c), inset 0 -1px 1px rgba(0,0,0,.3); }
+    .led[data-led="power"] { --c: var(--green); }
+    .led[data-led="hdd"] { --c: var(--amber); }
+    .led[data-led="fdd"] { --c: #55ff99; }
+    .led[data-led="auto"] { --c: var(--magenta); }
+    .led[data-led="auto"].on i { animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: .35; } }
+    .knobs { display: flex; gap: 8px; }
+    .knob {
+      cursor: pointer; width: 30px; height: 30px; border-radius: 50%; padding: 0;
+      background: radial-gradient(circle at 35% 30%, #4a453e, #1d1b18 70%);
+      border: 1px solid #0f0e0c; color: #a9a294; font-size: 13px;
+      box-shadow: 0 2px 3px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08);
+    }
+    .knob:active { transform: translateY(1px); box-shadow: 0 1px 1px rgba(0,0,0,.6); }
+    .knob:hover { color: var(--cyan); }
+
+    /* ---------- 状态 HUD ---------- */
+    .hud { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 1400px; }
+    .card {
+      background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 12px;
+      padding: 8px 12px; min-width: 120px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
+    }
+    .card .k { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em; }
+    .card .v { font: 600 15px/1.3 var(--mono); color: #fff; white-space: nowrap; }
+    .card .v.cyan { color: var(--cyan); text-shadow: 0 0 10px rgba(85,255,255,.45); }
+    .card .v.amber { color: var(--amber); text-shadow: 0 0 10px rgba(255,176,0,.35); }
+    .pill { display: inline-block; padding: 0 6px; border-radius: 6px; font: 600 11px/18px var(--mono); margin-right: 4px; background: #222837; color: #6b7386; border: 1px solid #333b4d; }
+    .pill.on { color: #000; background: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 8px rgba(85,255,255,.5); }
+    .meter { height: 6px; background: #20263380; border-radius: 3px; overflow: hidden; margin-top: 5px; }
+    .meter > span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--green), var(--cyan)); border-radius: 3px; transition: width .4s; }
+    .game {
+      display: none; align-items: center; gap: 18px; padding: 8px 16px;
+      background: linear-gradient(135deg, rgba(216,40,0,.22), rgba(32,56,236,.18)), var(--glass);
+      border-color: rgba(255,176,0,.35);
+    }
+    .game.active { display: flex; }
+    .game .stat { text-align: center; }
+    .game .stat .v { font-size: 17px; }
+    .hearts { color: var(--red); letter-spacing: 2px; text-shadow: 0 0 8px rgba(255,85,85,.6); }
+    .game .ai { font: 11px/1.35 var(--mono); color: var(--muted); min-width: 170px; white-space: pre; }
+
+    /* ---------- 帮助面板 ---------- */
     .help {
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,.6); z-index: 10;
+      background: rgba(0,0,0,.6); backdrop-filter: blur(3px); z-index: 10;
     }
     .help[hidden] { display: none; }
     .help .box {
@@ -108,15 +240,28 @@
     .help p { margin: 8px 0 0; color: #ccc; font-size: 13px; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
     noscript { display: block; padding: 20px; color: #fff; }
+    @media (prefers-reduced-motion: reduce) {
+      .monitor.crt .scanlines, .led[data-led="auto"].on i { animation: none; }
+      .swatch, .switch .track, .switch .track::after, .meter > span { transition: none; }
+    }
   </style>
 </head>
 <body>
-  <header class="toolbar" role="toolbar" aria-label="Simulator settings">
-    <span class="brand">HTML-DOS 6.22 <small>MS-DOS style simulator</small></span>
-    <button type="button" id="btn-theme">Theme</button>
-    <button type="button" id="btn-crt" aria-pressed="true">CRT: On</button>
-    <button type="button" id="btn-help" aria-haspopup="dialog">Help (F12)</button>
-    <button type="button" id="btn-reset" title="Erase virtual disks and settings">Factory reset</button>
+  <header class="topbar" role="toolbar" aria-label="Simulator settings">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">C:\&gt;_</span>
+      <div><b>HTML-DOS 6.22</b><small>MS-DOS style simulator &middot; Mode 13h &middot; MARIO.COM</small></div>
+    </div>
+    <div class="group" role="group" aria-label="Colour theme">
+      <span class="label">Theme</span>
+      <button type="button" class="swatch" data-theme="classic" title="Classic VGA" aria-label="Classic VGA theme" aria-pressed="false"></button>
+      <button type="button" class="swatch" data-theme="green" title="Green phosphor" aria-label="Green phosphor theme" aria-pressed="false"></button>
+      <button type="button" class="swatch" data-theme="amber" title="Amber" aria-label="Amber theme" aria-pressed="false"></button>
+      <button type="button" class="swatch" data-theme="blue" title="Blue shell" aria-label="Blue shell theme" aria-pressed="false"></button>
+    </div>
+    <button type="button" class="switch" id="btn-crt" role="switch" aria-checked="true"><span class="track" aria-hidden="true"></span>CRT</button>
+    <button type="button" class="btn" id="btn-help" aria-haspopup="dialog">Help <kbd>F12</kbd></button>
+    <button type="button" class="btn danger" id="btn-reset" title="Erase virtual disks and settings">Factory reset</button>
   </header>
   <main class="stage">
     <div class="monitor crt" id="monitor" tabindex="0" role="application" aria-label="DOS screen. Type commands and press Enter. Press F12 for help." aria-describedby="sr-live">
@@ -126,7 +271,36 @@
         <canvas id="glow-canvas" aria-hidden="true"></canvas>
         <div class="scanlines" aria-hidden="true"></div>
       </div>
+      <div class="chin">
+        <div class="plate">HTML&middot;DOS<small>VGA-1426 COLOR DISPLAY</small></div>
+        <div class="leds" aria-hidden="true">
+          <span class="led on" data-led="power"><i></i>PWR</span>
+          <span class="led" data-led="hdd"><i></i>HDD</span>
+          <span class="led" data-led="fdd"><i></i>FDD</span>
+          <span class="led" data-led="auto"><i></i>AUTO</span>
+        </div>
+        <div class="knobs">
+          <button type="button" class="knob" id="btn-degauss" title="Degauss (toggle CRT effect)" aria-label="Toggle CRT effect">&#9678;</button>
+          <button type="button" class="knob" id="btn-power" title="Reboot (files are kept)" aria-label="Reboot">&#9211;</button>
+        </div>
+      </div>
     </div>
+
+    <section class="hud" id="hud" aria-label="System status">
+      <div class="card"><div class="k">Video</div><div class="v cyan" id="hud-mode">TEXT 80&times;25</div></div>
+      <div class="card"><div class="k">Directory</div><div class="v" id="hud-path">C:\</div></div>
+      <div class="card"><div class="k">Keyboard</div><div class="v"><span class="pill on" id="hud-ins">INS</span><span class="pill" id="hud-caps">CAPS</span></div></div>
+      <div class="card"><div class="k">Clock</div><div class="v amber" id="hud-clock">--:--:--</div></div>
+      <div class="card"><div class="k">Drive C: free</div><div class="v" id="hud-free">-</div><div class="meter"><span id="hud-meter"></span></div></div>
+      <div class="card game" id="hud-game" aria-label="MARIO status">
+        <div class="stat"><div class="k">Score</div><div class="v amber" id="hud-score">000000</div></div>
+        <div class="stat"><div class="k">Coins</div><div class="v" id="hud-coins">00</div></div>
+        <div class="stat"><div class="k">Lives</div><div class="v hearts" id="hud-lives">&hearts;&hearts;&hearts;</div></div>
+        <div class="stat"><div class="k">Time</div><div class="v" id="hud-time">400</div></div>
+        <button type="button" class="switch amber" id="btn-auto" role="switch" aria-checked="false"><span class="track" aria-hidden="true"></span>Autopilot <kbd>P</kbd></button>
+        <div class="ai" id="hud-ai">A* idle</div>
+      </div>
+    </section>
   </main>
   <noscript>HTML-DOS needs JavaScript.</noscript>
 
@@ -161,6 +335,7 @@
         <tr><td>Z or Space</td><td>Jump (hold for a higher jump)</td></tr>
         <tr><td>X or Shift</td><td>Run</td></tr>
         <tr><td>Enter</td><td>Start / pause</td></tr>
+        <tr><td>P</td><td>Autopilot on / off (A* planner plays for you; MARIO /A starts with it on)</td></tr>
         <tr><td>Esc</td><td>Quit to DOS &nbsp;(MARIO /M = no music)</td></tr>
       </table>
       <p>MARIO.COM is an original, non-commercial tribute (own pixel art and music). It is not affiliated with Nintendo. MS-DOS is a trademark of Microsoft.</p>
@@ -183,6 +358,7 @@
   <script src="js/programs.js"></script>
   <script src="js/mario-data.js"></script>
   <script src="js/mario.js"></script>
+  <script src="js/mario-ai.js"></script>
   <script src="js/machine.js"></script>
   <script src="js/main.js"></script>
 </body>

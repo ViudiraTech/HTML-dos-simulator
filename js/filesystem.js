@@ -97,6 +97,9 @@
       this.curDrive = 'C';
       this.cwd = {};
       this.onChange = null;
+      /** @type {null|function(string,string):void} 磁盘访问回调 (盘符, 'r'|'w')，用于界面上的硬盘/软驱指示灯 */
+      this.onActivity = null;
+      this.lastDrive = 'C';
       if (!this.load()) this.reset();
     }
 
@@ -194,6 +197,7 @@
     /** 写入 storage */
     save() {
       if (this.onChange) this.onChange();
+      this._activity('w');
       if (!this.storage) return;
       try { this.storage.setItem(this.key, JSON.stringify(this.serialize())); }
       catch (e) { /* 存储配额不足时静默忽略，内存中的数据仍然有效 */ }
@@ -234,6 +238,7 @@
       const m = /^([A-Za-z]):(.*)$/.exec(path);
       if (m) { drive = m[1].toUpperCase(); path = m[2]; }
       if (!this.drives[drive]) throw new FsError('INVALID_DRIVE');
+      this.lastDrive = drive;
       let parts = path.startsWith('\\') ? [] : this.cwd[drive].slice();
       for (let seg of path.split('\\')) {
         seg = seg.trim().toUpperCase();
@@ -274,6 +279,9 @@
       return { parent, name: loc.parts[loc.parts.length - 1] };
     }
 
+    /** 通知一次磁盘访问（最近解析的路径所在盘符） */
+    _activity(kind) { if (this.onActivity) this.onActivity(this.lastDrive, kind); }
+
     // ---------------- 查询 ----------------
 
     /**
@@ -297,6 +305,8 @@
       const loc = typeof path === 'string' ? this.resolve(path) : path;
       const d = this._dirAt(loc.drive, loc.parts);
       if (!d) throw new FsError('PATH_NOT_FOUND');
+      this.lastDrive = loc.drive;
+      this._activity('r');
       return Array.from(d.children.values()).map(n => ({ type: n.type, name: n.name, attr: n.attr, mtime: n.mtime, size: sizeOf(n), node: n }));
     }
 
@@ -351,6 +361,7 @@
       const s = this.stat(path);
       if (!s) throw new FsError('NOT_FOUND');
       if (s.type === 'dir') throw new FsError('IS_DIR');
+      this._activity('r');
       if (!s.node.binary) return s.node.data;
       const bytes = b64.decode(s.node.data);
       let out = '';
@@ -363,6 +374,7 @@
       const s = this.stat(path);
       if (!s) throw new FsError('NOT_FOUND');
       if (s.type === 'dir') throw new FsError('IS_DIR');
+      this._activity('r');
       if (s.node.binary) return b64.decode(s.node.data);
       const out = new Uint8Array(s.node.data.length);
       for (let i = 0; i < out.length; i++) out[i] = s.node.data.charCodeAt(i) & 0xFF;
