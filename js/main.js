@@ -51,30 +51,44 @@
     m.onAnnounce = announce;
 
     // ---------------- 布局：4:3 显示器，图形按整数倍缩放 ----------------
+    /** 元素在文档流中占用的高度（隐藏或 position:fixed 悬浮时为 0） */
+    const flowHeight = (el) => (el && el.offsetParent !== null ? el.offsetHeight : 0);
     function layout() {
-      // 预留顶栏、显示器下巴（指示灯一栏）、状态 HUD 与边距
-      const bar = document.querySelector('.topbar').offsetHeight;
-      const chin = document.querySelector('.chin').offsetHeight;
-      const hud = $('hud').offsetHeight;
-      const availW = Math.min(root.innerWidth - 64, 1400);
-      const availH = root.innerHeight - bar - chin - hud - 96;
-      let W = Math.max(640, Math.min(availW, availH * 4 / 3));
-      W = Math.floor(W);
-      const H = Math.floor(W * 3 / 4);
+      const touch = document.body.classList.contains('touch');
+      // 手机上内容一旦溢出，innerWidth 会随之变大（布局视口被撑宽），所以取 clientWidth 的较小值
+      const vw = Math.min(root.innerWidth, document.documentElement.clientWidth || root.innerWidth), vh = root.innerHeight;
+      const small = vw <= 760 || vh <= 540; // 手机竖屏或横屏
+      // 预留顶栏、显示器下巴（指示灯一栏）、触屏按键/手柄、状态 HUD（手机上 HUD 放在下方可滚动，不参与计算）与边距
+      const bar = flowHeight(document.querySelector('.topbar'));
+      const chin = flowHeight(document.querySelector('.chin'));
+      const hud = touch || small ? 0 : flowHeight($('hud'));
+      const controls = flowHeight($('touch-keys')) + flowHeight($('gamepad'));
+      const availW = Math.min(vw - (small ? 28 : 64), 1400);
+      const availH = vh - bar - chin - hud - controls - (small ? 36 : 96);
+      // 手机上玩图形程序时，屏幕框按画面比例收紧，不再留 4:3 的黑边
+      const gw = m.gfx.width, gh = m.gfx.height;
+      const aspect = touch && m.display !== 'text' ? gw / gh : 4 / 3;
+      const W = Math.floor(Math.max(small ? 240 : 640, Math.min(availW, availH * aspect)));
+      const H = Math.floor(W / aspect);
       screen.style.width = W + 'px';
       screen.style.height = H + 'px';
+      // 横屏时手柄悬浮在画面两侧，按两侧留白宽度缩放（见 dos.html 的 --gutter）
+      document.body.style.setProperty('--gutter', Math.max(0, Math.floor((vw - W) / 2 - 12)) + 'px');
       // 文本模式留出少量“过扫描”黑边，避免首列字符贴住圆角显像管边缘
       const pad = Math.round(W * 0.025);
       textCanvas.style.width = (W - pad * 2) + 'px';
       textCanvas.style.height = (H - pad * 2) + 'px';
       textCanvas.style.left = pad + 'px';
       textCanvas.style.top = pad + 'px';
-      const gw = m.gfx.width, gh = m.gfx.height;
-      const scale = Math.max(1, Math.floor(Math.min(W / gw, H / gh)));
-      gfxCanvas.style.width = gw * scale + 'px';
-      gfxCanvas.style.height = gh * scale + 'px';
-      gfxCanvas.style.left = Math.floor((W - gw * scale) / 2) + 'px';
-      gfxCanvas.style.top = Math.floor((H - gh * scale) / 2) + 'px';
+      const fit = Math.min(W / gw, H / gh);
+      let scale = Math.max(1, Math.floor(fit));
+      // 小屏上整数倍缩放会浪费大半屏幕（如 256 像素宽的画面放进 340 像素），此时允许非整数缩放
+      if (touch && fit < 2) scale = fit;
+      const sw = Math.round(gw * scale), sh = Math.round(gh * scale);
+      gfxCanvas.style.width = sw + 'px';
+      gfxCanvas.style.height = sh + 'px';
+      gfxCanvas.style.left = Math.floor((W - sw) / 2) + 'px';
+      gfxCanvas.style.top = Math.floor((H - sh) / 2) + 'px';
       const src = m.display === 'text' ? textCanvas : gfxCanvas;
       glowCanvas.style.width = src.style.width;
       glowCanvas.style.height = src.style.height;
@@ -88,7 +102,7 @@
       gfxCanvas.hidden = text;
       monitor.dataset.mode = m.display;
       m.term.dirty = true;
-      layout();
+      updateControls();
     }
     m.onDisplayChange = onDisplayChange;
 
@@ -102,10 +116,12 @@
       for (const b of swatches) b.setAttribute('aria-pressed', String(b.dataset.theme === textRenderer.themeName));
       $('btn-crt').setAttribute('aria-checked', String(!!m.settings.crt));
       m.term.dirty = true;
+      applyTouch();
     }
     m.onSettingsChange = applySettings;
 
-    const refocus = () => monitor.focus({ preventScroll: true });
+    // 软键盘打开时（焦点在代理输入框）不要把焦点抢回显示器，否则键盘会收起
+    const refocus = () => { if (document.activeElement !== $('kbd-proxy')) monitor.focus({ preventScroll: true }); };
     for (const b of swatches) b.addEventListener('click', () => { m.updateSettings({ theme: b.dataset.theme }); refocus(); });
     const toggleCrt = () => { m.updateSettings({ crt: !m.settings.crt }); refocus(); };
     $('btn-crt').addEventListener('click', toggleCrt);
@@ -203,7 +219,135 @@
       e.preventDefault();
       m.term.scrollView(e.deltaY < 0 ? 3 : -3);
     }, { passive: false });
-    monitor.addEventListener('pointerdown', () => { DOS.Audio.unlock(); refocus(); });
+    monitor.addEventListener('pointerdown', (e) => {
+      DOS.Audio.unlock();
+      if (e.pointerType === 'mouse' || !touchOn()) refocus();
+    });
+
+    // ---------------- 触屏：软键盘、按键条、手柄、滑动回看 ----------------
+    const proxy = $('kbd-proxy'), touchKeys = $('touch-keys'), gamepad = $('gamepad');
+    m.input.attachTextProxy(proxy);
+    const autoTouch = !!((root.matchMedia && root.matchMedia('(pointer: coarse)').matches) || navigator.maxTouchPoints > 0);
+    function touchOn() { return m.settings.touch === undefined ? autoTouch : !!m.settings.touch; }
+    const vibrate = () => { try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) { /* 不支持 */ } };
+    const prevent = (e) => { if (e.cancelable) e.preventDefault(); };
+    const openKeyboard = () => proxy.focus({ preventScroll: true });
+
+    function applyTouch() {
+      document.body.classList.toggle('touch', touchOn());
+      $('btn-touch').setAttribute('aria-checked', String(touchOn()));
+      updateControls();
+    }
+    function updateControls() {
+      const gfx = m.display === 'gfx';
+      touchKeys.classList.toggle('show', !gfx);
+      gamepad.classList.toggle('show', gfx);
+      document.body.classList.toggle('gaming', gfx);
+      if (gfx && document.activeElement === proxy) proxy.blur(); // 进入游戏时收起软键盘
+      if (!gfx) releaseAllPad();
+      layout();
+    }
+    $('btn-touch').addEventListener('click', () => { m.updateSettings({ touch: !touchOn() }); refocus(); });
+    // iOS 只在 touchend/click 中允许解锁音频
+    document.addEventListener('touchend', () => DOS.Audio.unlock(), { passive: true });
+    document.addEventListener('click', () => DOS.Audio.unlock());
+
+    // 点按屏幕：自检时跳过，否则在命令行下弹出软键盘；上下滑动回看历史输出
+    let touchY = null, swipeAcc = 0, swiped = false;
+    screen.addEventListener('touchstart', (e) => {
+      if (!touchOn()) return;
+      touchY = e.touches[0].clientY; swipeAcc = 0; swiped = false;
+    }, { passive: true });
+    screen.addEventListener('touchmove', (e) => {
+      if (!touchOn() || touchY === null || m.input.mode !== 'shell') return;
+      const y = e.touches[0].clientY;
+      swipeAcc += y - touchY;
+      touchY = y;
+      const step = Math.max(8, screen.offsetHeight / m.term.rows);
+      while (Math.abs(swipeAcc) >= step) {
+        m.term.scrollView(swipeAcc > 0 ? 1 : -1);
+        swipeAcc -= Math.sign(swipeAcc) * step;
+        swiped = true;
+      }
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+    screen.addEventListener('touchend', (e) => {
+      if (!touchOn()) return;
+      touchY = null;
+      // 取消随后的模拟鼠标事件：否则 mousedown 会把焦点移回显示器，软键盘随即收起
+      if (e.cancelable) e.preventDefault();
+      if (swiped) return;
+      if (m.booting) { m.input.push(DOS.Input.key('Escape')); return; }
+      if (m.input.mode === 'shell') { m.term.resetView(); openKeyboard(); }
+    }, { passive: false });
+
+    // 按键条：按下即发送（不抢焦点，软键盘保持打开）；方向键与退格按住连发
+    for (const b of touchKeys.querySelectorAll('.tkey')) {
+      b.addEventListener('touchstart', prevent, { passive: false });
+      b.addEventListener('mousedown', prevent);
+      let timer = null;
+      const key = () => [b.dataset.code, b.dataset.key, { ctrl: !!b.dataset.ctrl }];
+      const release = () => {
+        clearTimeout(timer); clearInterval(timer); timer = null;
+        if (!b.classList.contains('pressed')) return;
+        b.classList.remove('pressed');
+        if (b.dataset.code) { const [c, k, mods] = key(); m.input.virtualKey(c, k, false, mods); }
+      };
+      b.addEventListener('pointerdown', (e) => {
+        if (e.cancelable) e.preventDefault();
+        DOS.Audio.unlock();
+        vibrate();
+        b.classList.add('pressed');
+        if (b.dataset.action === 'keyboard') { if (document.activeElement === proxy) proxy.blur(); else openKeyboard(); return; }
+        if (b.dataset.type) { m.term.resetView(); m.input.feed(b.dataset.type + '{Enter}'); return; }
+        const [c, k, mods] = key();
+        const fire = () => m.input.virtualKey(c, k, true, mods);
+        fire();
+        if (b.dataset.repeat) timer = setTimeout(() => { timer = setInterval(fire, 70); }, 380);
+      });
+      for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, release);
+    }
+
+    // 手柄：多点触控，手指在按键间滑动会自动切换（例如从 ▶ 滑到 ◀ 转身）
+    const heldBy = new Map();   // pointerId → 按钮
+    const holdCount = new Map(); // 按钮 → 按住它的手指数
+    const padPress = (btn) => {
+      const n = (holdCount.get(btn) || 0) + 1;
+      holdCount.set(btn, n);
+      if (n === 1) { btn.classList.add('pressed'); vibrate(); m.input.virtualKey(btn.dataset.code, btn.dataset.key, true); }
+    };
+    const padRelease = (btn) => {
+      const n = (holdCount.get(btn) || 0) - 1;
+      if (n > 0) { holdCount.set(btn, n); return; }
+      holdCount.delete(btn);
+      btn.classList.remove('pressed');
+      m.input.virtualKey(btn.dataset.code, btn.dataset.key, false);
+    };
+    function releaseAllPad() {
+      for (const btn of holdCount.keys()) { btn.classList.remove('pressed'); m.input.virtualKey(btn.dataset.code, btn.dataset.key, false); }
+      holdCount.clear();
+      heldBy.clear();
+    }
+    const padTrack = (e) => {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const btn = el && el.closest ? el.closest('#gamepad button[data-code]') : null;
+      const prev = heldBy.get(e.pointerId);
+      if (prev === btn) return;
+      if (prev) padRelease(prev);
+      if (btn) { padPress(btn); heldBy.set(e.pointerId, btn); } else heldBy.delete(e.pointerId);
+    };
+    const padEnd = (e) => { const b = heldBy.get(e.pointerId); if (b) padRelease(b); heldBy.delete(e.pointerId); };
+    gamepad.addEventListener('pointerdown', (e) => {
+      if (e.cancelable) e.preventDefault();
+      DOS.Audio.unlock();
+      try { e.target.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+      padTrack(e);
+    });
+    gamepad.addEventListener('pointermove', (e) => { if (heldBy.has(e.pointerId)) padTrack(e); });
+    gamepad.addEventListener('pointerup', padEnd);
+    gamepad.addEventListener('pointercancel', padEnd);
+    gamepad.addEventListener('touchstart', prevent, { passive: false });
+    gamepad.addEventListener('contextmenu', prevent);
 
     // ---------------- 渲染循环 ----------------
     let lastBlink = null;

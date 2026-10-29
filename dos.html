@@ -28,7 +28,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="description" content="An MS-DOS style command line, Mode 13h graphics and a World 1-1 tribute platformer in pure HTML5.">
   <title>HTML-DOS 6.22</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Ctext x='1' y='12' font-family='monospace' font-size='11' fill='%23aaa'%3EC%3E%3C/text%3E%3C/svg%3E">
@@ -57,8 +60,8 @@
     body {
       color: var(--fg);
       font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      min-width: 680px;
       overflow-x: auto;
+      -webkit-text-size-adjust: 100%;
       background:
         radial-gradient(1200px 600px at 50% -10%, rgba(85, 255, 255, .10), transparent 60%),
         radial-gradient(900px 500px at 100% 100%, rgba(255, 85, 255, .07), transparent 60%),
@@ -218,6 +221,102 @@
     .hearts { color: var(--red); letter-spacing: 2px; text-shadow: 0 0 8px rgba(255,85,85,.6); }
     .game .ai { font: 11px/1.35 var(--mono); color: var(--muted); min-width: 170px; white-space: pre; }
 
+    /* ---------- 触屏：软键盘代理、按键条、手柄 ---------- */
+    #kbd-proxy {
+      position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; margin: 0;
+      resize: none; overflow: hidden; font-size: 16px; /* ≥16px：避免 iOS 聚焦时自动放大 */ caret-color: transparent; color: transparent; background: transparent;
+    }
+    .touch-keys, .gamepad { display: none; }
+    body.touch .screen { touch-action: none; -webkit-user-select: none; user-select: none; }
+    body.touch .touch-keys.show { display: flex; }
+    body.touch .gamepad.show { display: grid; }
+    .touch-keys {
+      flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 100%; padding: 0 4px;
+      user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    }
+    .tkey {
+      min-width: 44px; height: 40px; padding: 0 10px; border-radius: 10px; cursor: pointer;
+      font: 600 13px/1 var(--mono); color: var(--fg); background: #222837; border: 1px solid #3b4357;
+      box-shadow: 0 2px 0 #0d1018; touch-action: manipulation;
+    }
+    .tkey.accent { color: var(--cyan); border-color: rgba(85,255,255,.45); }
+    .tkey.macro { color: var(--amber); border-color: rgba(255,176,0,.4); }
+    .tkey.pressed, .tkey:active { background: var(--cyan); color: #000; transform: translateY(1px); box-shadow: none; }
+    .gamepad {
+      --d: min(36vw, 156px);   /* 十字键边长 */
+      --f: min(15vw, 68px);    /* A/B 键直径 */
+      width: 100%; max-width: 560px; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px;
+      padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+      touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    }
+    .gamepad button { touch-action: none; cursor: pointer; color: #fff; font: 700 14px/1 var(--mono); }
+    .dpad { position: relative; width: var(--d); height: var(--d); justify-self: start; }
+    .dpad::before { /* 十字底座 */
+      content: ""; position: absolute; inset: calc(var(--d) / 3) 0; border-radius: 12px; background: #1b2030; box-shadow: inset 0 2px 6px rgba(0,0,0,.6);
+    }
+    .dpad::after { content: ""; position: absolute; inset: 0 calc(var(--d) / 3); border-radius: 12px; background: #1b2030; box-shadow: inset 0 2px 6px rgba(0,0,0,.6); }
+    .dpad button {
+      position: absolute; z-index: 1; width: calc(var(--d) / 3); height: calc(var(--d) / 3); border-radius: 10px;
+      background: linear-gradient(180deg, #343c52, #232a3b); border: 1px solid #47506a; box-shadow: 0 3px 0 #0d1018;
+    }
+    .dpad .up { left: calc(var(--d) / 3); top: 0; } .dpad .down { left: calc(var(--d) / 3); bottom: 0; }
+    .dpad .left { left: 0; top: calc(var(--d) / 3); } .dpad .right { right: 0; top: calc(var(--d) / 3); }
+    .face { display: flex; gap: min(3vw, 14px); justify-self: end; align-items: center; }
+    .face button {
+      width: var(--f); height: var(--f); border-radius: 50%; border: 2px solid rgba(0,0,0,.4); font-size: 20px;
+      box-shadow: 0 4px 0 #0d1018, inset 0 2px 0 rgba(255,255,255,.25);
+    }
+    .face .b { background: radial-gradient(circle at 35% 30%, #5577ff, #2038ec); margin-top: calc(var(--f) * .45); }
+    .face .a { background: radial-gradient(circle at 35% 30%, #ff6a4a, #d82800); margin-bottom: calc(var(--f) * .45); }
+    .mid { display: flex; flex-direction: column; gap: 8px; align-items: center; justify-self: center; }
+    .mid button {
+      min-width: min(16vw, 74px); height: 30px; padding: 0 6px; border-radius: 15px; font-size: min(3vw, 11px); letter-spacing: .06em;
+      background: #2a3040; border: 1px solid #47506a; box-shadow: 0 2px 0 #0d1018;
+    }
+    .mid .auto { color: var(--magenta); border-color: rgba(255,85,255,.45); }
+    .mid .exit { color: var(--red); border-color: rgba(255,85,85,.45); }
+    .gamepad button.pressed { filter: brightness(1.45); transform: translateY(2px); box-shadow: none; }
+
+    /* ---------- 小屏 / 手机 ---------- */
+    @media (max-width: 760px) {
+      .topbar { gap: 8px; padding: 6px 10px; padding-top: calc(6px + env(safe-area-inset-top)); }
+      .brand small, .group > .label, #btn-reset { display: none; }
+      .brand b { font-size: 13px; }
+      .swatch { width: 24px; height: 24px; }
+      .stage { padding: 8px 6px 16px; gap: 10px; }
+      .monitor { padding: 8px 8px 0; border-radius: 14px; }
+      .monitor::before { border-radius: 14px; }
+      .chin { padding: 6px 4px 8px; gap: 10px; }
+      .plate small { display: none; }
+      .leds { gap: 10px; }
+      .knob { width: 26px; height: 26px; }
+      .hud { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; width: 100%; padding-bottom: 4px; }
+      .card { min-width: auto; flex: 0 0 auto; }
+      .game { gap: 12px; }
+    }
+    @media (max-width: 400px) {
+      .plate { display: none; }
+      .leds { gap: 8px; margin-left: 0; }
+      .led { font-size: 9px; letter-spacing: .06em; gap: 4px; }
+      .knobs { margin-left: auto; }
+    }
+    /* 横屏手机玩游戏：隐藏顶栏/HUD，手柄悬浮在画面两侧 */
+    @media (orientation: landscape) and (max-height: 540px) {
+      body.touch.gaming .topbar, body.touch.gaming .hud, body.touch.gaming .chin { display: none; }
+      body.touch.gaming .stage { padding: 4px; }
+      body.touch .gamepad.show {
+        position: fixed; z-index: 4; left: 0; right: 0; bottom: 0; max-width: none; pointer-events: none;
+        padding: 0 calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+      }
+      body.touch .gamepad.show {
+        --d: min(calc(var(--gutter, 160px) - 8px), 44vh, 156px);
+        --f: min(calc((var(--gutter, 160px) - 20px) / 2), 20vh, 68px);
+      }
+      body.touch .gamepad.show > * { pointer-events: auto; opacity: .82; }
+      /* START/AUTO/EXIT 放到右上角的空白处，不遮挡画面 */
+      body.touch .gamepad.show .mid { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
+    }
+
     /* ---------- 帮助面板 ---------- */
     .help {
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -260,6 +359,7 @@
       <button type="button" class="swatch" data-theme="blue" title="Blue shell" aria-label="Blue shell theme" aria-pressed="false"></button>
     </div>
     <button type="button" class="switch" id="btn-crt" role="switch" aria-checked="true"><span class="track" aria-hidden="true"></span>CRT</button>
+    <button type="button" class="switch" id="btn-touch" role="switch" aria-checked="false" title="On-screen keys and gamepad"><span class="track" aria-hidden="true"></span>Touch</button>
     <button type="button" class="btn" id="btn-help" aria-haspopup="dialog">Help <kbd>F12</kbd></button>
     <button type="button" class="btn danger" id="btn-reset" title="Erase virtual disks and settings">Factory reset</button>
   </header>
@@ -270,6 +370,7 @@
         <canvas id="gfx-canvas" width="320" height="200" hidden></canvas>
         <canvas id="glow-canvas" aria-hidden="true"></canvas>
         <div class="scanlines" aria-hidden="true"></div>
+        <textarea id="kbd-proxy" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="enter" inputmode="text" aria-label="DOS keyboard input" tabindex="-1"></textarea>
       </div>
       <div class="chin">
         <div class="plate">HTML&middot;DOS<small>VGA-1426 COLOR DISPLAY</small></div>
@@ -283,6 +384,42 @@
           <button type="button" class="knob" id="btn-degauss" title="Degauss (toggle CRT effect)" aria-label="Toggle CRT effect">&#9678;</button>
           <button type="button" class="knob" id="btn-power" title="Reboot (files are kept)" aria-label="Reboot">&#9211;</button>
         </div>
+      </div>
+    </div>
+
+    <div class="touch-keys" id="touch-keys" role="toolbar" aria-label="On-screen keys">
+      <button type="button" class="tkey accent" data-action="keyboard" aria-label="Show keyboard">&#9000;</button>
+      <button type="button" class="tkey" data-code="Escape" data-key="Escape">Esc</button>
+      <button type="button" class="tkey" data-code="Tab" data-key="Tab">Tab</button>
+      <button type="button" class="tkey" data-code="KeyC" data-key="c" data-ctrl="1" aria-label="Control C">^C</button>
+      <button type="button" class="tkey" data-code="ArrowUp" data-key="ArrowUp" data-repeat="1" aria-label="Up">&uarr;</button>
+      <button type="button" class="tkey" data-code="ArrowDown" data-key="ArrowDown" data-repeat="1" aria-label="Down">&darr;</button>
+      <button type="button" class="tkey" data-code="ArrowLeft" data-key="ArrowLeft" data-repeat="1" aria-label="Left">&larr;</button>
+      <button type="button" class="tkey" data-code="ArrowRight" data-key="ArrowRight" data-repeat="1" aria-label="Right">&rarr;</button>
+      <button type="button" class="tkey" data-code="Backspace" data-key="Backspace" data-repeat="1" aria-label="Backspace">&#9003;</button>
+      <button type="button" class="tkey" data-code="F3" data-key="F3">F3</button>
+      <button type="button" class="tkey accent" data-code="Enter" data-key="Enter">Enter</button>
+      <button type="button" class="tkey macro" data-type="MARIO">MARIO</button>
+      <button type="button" class="tkey macro" data-type="DIR /W">DIR</button>
+      <button type="button" class="tkey macro" data-type="MENU">MENU</button>
+      <button type="button" class="tkey macro" data-type="HELP">HELP</button>
+    </div>
+
+    <div class="gamepad" id="gamepad" role="group" aria-label="On-screen gamepad">
+      <div class="dpad">
+        <button type="button" class="up" data-code="ArrowUp" data-key="ArrowUp" aria-label="Up">&#9650;</button>
+        <button type="button" class="left" data-code="ArrowLeft" data-key="ArrowLeft" aria-label="Left">&#9664;</button>
+        <button type="button" class="right" data-code="ArrowRight" data-key="ArrowRight" aria-label="Right">&#9654;</button>
+        <button type="button" class="down" data-code="ArrowDown" data-key="ArrowDown" aria-label="Down">&#9660;</button>
+      </div>
+      <div class="mid">
+        <button type="button" data-code="Enter" data-key="Enter">START</button>
+        <button type="button" class="auto" data-code="KeyP" data-key="p">AUTO</button>
+        <button type="button" class="exit" data-code="Escape" data-key="Escape">EXIT</button>
+      </div>
+      <div class="face">
+        <button type="button" class="b" data-code="KeyX" data-key="x" aria-label="B, run">B</button>
+        <button type="button" class="a" data-code="Space" data-key=" " aria-label="A, jump">A</button>
       </div>
     </div>
 
@@ -336,6 +473,14 @@
         <tr><td>X or Shift</td><td>Run</td></tr>
         <tr><td>Enter</td><td>Start / pause</td></tr>
         <tr><td>P</td><td>Autopilot on / off (A* planner plays for you; MARIO /A starts with it on)</td></tr>
+      </table>
+      <h3>Phones and tablets</h3>
+      <table>
+        <tr><td>Tap the screen</td><td>Open the soft keyboard (or the &#9000; key)</td></tr>
+        <tr><td>Key bar</td><td>Esc, Tab, Ctrl+C, arrows, Backspace, F3, Enter and quick commands</td></tr>
+        <tr><td>Swipe on screen</td><td>Scroll back through earlier output</td></tr>
+        <tr><td>Gamepad</td><td>Shown in graphics programs: D-pad, A = jump, B = run, START, AUTO, EXIT</td></tr>
+        <tr><td>Touch switch</td><td>Top bar: force the on-screen controls on or off</td></tr>
         <tr><td>Esc</td><td>Quit to DOS &nbsp;(MARIO /M = no music)</td></tr>
       </table>
       <p>MARIO.COM is an original, non-commercial tribute (own pixel art and music). It is not affiliated with Nintendo. MS-DOS is a trademark of Microsoft.</p>
