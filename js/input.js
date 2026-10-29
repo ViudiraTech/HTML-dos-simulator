@@ -52,7 +52,7 @@
      */
     attach(target) {
       target.addEventListener('keydown', e => this._onKeyDown(e));
-      target.addEventListener('keyup', e => this.keysDown.delete(e.code));
+      target.addEventListener('keyup', e => this._onKeyUp(e));
       target.addEventListener('blur', () => this.keysDown.clear());
       target.addEventListener('paste', e => {
         const text = (e.clipboardData || root.clipboardData).getData('text');
@@ -77,7 +77,11 @@
       return { key: name, code: mods.code || name, ctrl: !!mods.ctrl, alt: !!mods.alt, shift: !!mods.shift, char: '' };
     }
 
+    _onKeyUp(e) { this.keysDown.delete(e.code); }
+
     _onKeyDown(e) {
+      // 手机软键盘/输入法：字符经由 keyCode 229 / "Unidentified" 送达，交给 attachTextProxy 的 input 事件处理
+      if (e.isComposing || e.keyCode === 229 || e.key === 'Unidentified' || e.key === 'Process') return;
       const ev = Input.normalize(e);
       if (this.onAnyKey) this.onAnyKey();
       if (this.onGlobalKey && this.onGlobalKey(ev, e)) { e.preventDefault(); return; }
@@ -102,6 +106,60 @@
         if (this.queue.length >= 16 && !this.waiters.length) { if (this.onBell) this.onBell(); return; }
         this.push(ev);
       }
+    }
+
+    /**
+     * 虚拟按键（屏幕按钮、手柄）：构造与真实键盘相同的事件，走完全相同的处理路径。
+     * @param {string} code KeyboardEvent.code，如 'ArrowLeft'、'Space'、'KeyC'
+     * @param {string} key  KeyboardEvent.key，如 'ArrowLeft'、' '、'c'
+     * @param {boolean} down true = 按下，false = 松开
+     * @param {{ctrl?:boolean, shift?:boolean}} [mods]
+     */
+    virtualKey(code, key, down, mods = {}) {
+      const e = {
+        code, key, ctrlKey: !!mods.ctrl, metaKey: false, altKey: false, shiftKey: !!mods.shift,
+        repeat: false, keyCode: 0, isComposing: false, preventDefault() {}
+      };
+      if (down) this._onKeyDown(e); else this._onKeyUp(e);
+    }
+
+    /**
+     * 让一个（不可见的）textarea 承接手机软键盘输入。
+     * 软键盘常以 input / composition 事件而不是 keydown 送出字符，这里把它们翻译成按键事件。
+     * @param {HTMLTextAreaElement} el
+     */
+    attachTextProxy(el) {
+      const flushText = (text) => {
+        if (this.onAnyKey) this.onAnyKey();
+        for (const ch of text.replace(/\r\n?/g, '\n')) {
+          if (ch === '\n') this.push(Input.key('Enter'));
+          else if (this.mode === 'shell') this.push(Input.char(ch));
+        }
+      };
+      // 保留一个哨兵空格：部分 Android 键盘在输入框为空时不会发出退格事件
+      const SENT = ' ';
+      const reset = () => { el.value = SENT; try { el.setSelectionRange(1, 1); } catch (e) { /* 未聚焦 */ } };
+      reset();
+      el.addEventListener('focus', reset);
+      let composing = false;
+      el.addEventListener('compositionstart', () => { composing = true; });
+      el.addEventListener('compositionend', (e) => { composing = false; flushText(e.data || ''); reset(); });
+      el.addEventListener('beforeinput', (e) => {
+        if (composing || e.isComposing) return;
+        const t = e.inputType;
+        if (t === 'deleteContentBackward') { e.preventDefault(); this.push(Input.key('Backspace')); }
+        else if (t === 'deleteContentForward') { e.preventDefault(); this.push(Input.key('Delete')); }
+        else if (t === 'insertLineBreak' || t === 'insertParagraph') { e.preventDefault(); this.push(Input.key('Enter')); }
+        else if (t === 'insertText' && e.data) { e.preventDefault(); flushText(e.data); }
+      });
+      // 不支持 beforeinput 取消的浏览器：在 input 事件里兜底读取
+      el.addEventListener('input', (e) => {
+        if (composing || e.isComposing) return;
+        const v = el.value;
+        if (!v.startsWith(SENT)) this.push(Input.key('Backspace')); // 哨兵被删掉 = 退格
+        else if (v.length > 1) flushText(v.slice(1));
+        reset();
+      });
     }
 
     /** 触发 Ctrl+C 中断 */

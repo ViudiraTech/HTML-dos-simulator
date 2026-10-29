@@ -4,7 +4,7 @@
 'use strict';
 const path = require('path');
 const FILES = ['font', 'terminal', 'input', 'filesystem', 'disk-image', 'parser', 'batch', 'commands',
-  'graphics', 'audio', 'programs', 'mario-data', 'mario', 'machine'];
+  'graphics', 'audio', 'programs', 'mario-data', 'mario', 'mario-ai', 'machine'];
 for (const f of FILES) require(path.join(__dirname, '..', 'js', f + '.js'));
 
 /** 简易内存 storage（模拟 localStorage） */

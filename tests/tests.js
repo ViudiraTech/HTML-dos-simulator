@@ -832,5 +832,164 @@
     assert(g.coins > 0, 'collected bonus coins on the way');
   });
 
+  // ==================================================================
+  // 自动驾驶（A* 前向模型）
+  // ==================================================================
+
+  test('MarioGame.clone: deterministic forward model, isolated from the original', () => {
+    const g = new DOS.MarioGame({ autoStart: true });
+    for (let i = 0; i < 120; i++) g.step({ right: true, b: true });
+    const c = g.clone();
+    const inputs = [];
+    for (let i = 0; i < 200; i++) inputs.push({ right: true, b: i % 3 !== 0, a: i % 40 < 20 });
+    const a = g.clone(), b = g.clone();
+    for (const inp of inputs) { a.step(inp); b.step(inp); }
+    eq([a.mario.x, a.mario.y, a.score, a.enemies.length, a.state], [b.mario.x, b.mario.y, b.score, b.enemies.length, b.state], 'same inputs give the same result');
+    eq(c.events.length, 0, 'clones are silent');
+    // 克隆体顶问号块不影响原游戏（写时复制）
+    const fresh = new DOS.MarioGame({ autoStart: true });
+    const fc = fresh.clone();
+    fc.mario.x = 16 * 16 + 2;
+    for (let i = 0; i < 40; i++) fc.step({ a: true });
+    eq(fc.area.get(16, 9), DOS.MarioTiles.USED, 'clone hit the ? block');
+    eq(fresh.area.get(16, 9), DOS.MarioTiles.QUESTION, 'original untouched');
+    eq(fresh.coins, 0);
+  });
+
+  test('MarioGame.clone: copies every field of the game and of Mario', () => {
+    const g = new DOS.MarioGame({ autoStart: true });
+    for (let i = 0; i < 120; i++) g.step({ right: true, b: true, a: i % 40 < 20 });
+    g.transform = { kind: 'grow', t: 1 };
+    const c = g.clone();
+    for (const k of Object.keys(g)) assert(k in c, 'game field ' + k + ' is cloned');
+    for (const k of Object.keys(g.mario)) assert(k in c.mario, 'mario field ' + k + ' is cloned');
+    for (const k of Object.keys(g.mario)) eq(c.mario[k], g.mario[k], 'mario.' + k);
+    assert(c.transform !== g.transform && c.transform.kind === 'grow');
+  });
+
+  test('Autopilot: clears World 1-1 without losing a life', () => {
+    const g = new DOS.MarioGame({ lives: 3 });
+    const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 200 });
+    let deaths = 0, prev = g.state;
+    for (let f = 0; f < 60 * 60 * 3 && g.state !== 'clear'; f++) {
+      g.step(pilot.next(g));
+      if (g.state === 'dying' && prev !== 'dying') deaths++;
+      prev = g.state;
+    }
+    eq(g.state, 'clear');
+    eq(deaths, 0, 'no deaths');
+    eq(g.lives, 3);
+    assert(pilot.stats.searches > 0 && pilot.stats.nodes > 0);
+  });
+
+  test('Autopilot: finds the way out of the bonus room and still reaches the flag', () => {
+    const g = new DOS.MarioGame({ lives: 1, autoStart: true });
+    g.area = g.areas.bonus; g.camX = 0; g.enemies = [];
+    g.mario.x = 34; g.mario.y = 16;
+    const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 200 });
+    let sawMain = false;
+    for (let f = 0; f < 60 * 60 * 2 && g.state !== 'clear'; f++) {
+      g.step(pilot.next(g));
+      if (g.area.id === 'main') sawMain = true;
+      assert(g.state !== 'dying', 'autopilot died at x=' + Math.round(g.mario.x));
+    }
+    assert(sawMain, 'left the bonus room through the side pipe');
+    eq(g.state, 'clear');
+  });
+
+  test('Autopilot personas: every AI style clears 1-1 without dying, each in its own way', () => {
+    const run = {};
+    for (const id of DOS.MarioAutoPilot.PERSONA_ORDER) {
+      const g = new DOS.MarioGame({ lives: 3 });
+      const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 300, persona: id });
+      let deaths = 0, prev = g.state, bonus = false, f = 0;
+      for (; f < 60 * 60 * 3 && g.state !== 'clear'; f++) {
+        g.step(pilot.next(g));
+        if (g.state === 'dying' && prev !== 'dying') deaths++;
+        if (g.area.id === 'bonus') bonus = true;
+        prev = g.state;
+      }
+      eq(g.state, 'clear', id + ' clears the level');
+      eq(deaths, 0, id + ' never dies');
+      const s = g.stats;
+      run[id] = { frames: f, bonus, coins: g.coins, blocks: s.blocks, items: s.items, secrets: s.secrets, enemies: s.stomps + s.kicks + s.kills };
+    }
+    const { allround, speedrun, collector, hunter, explorer, cautious } = run;
+    for (const id of Object.keys(run)) if (id !== 'speedrun') assert(speedrun.frames < run[id].frames, 'SPEEDRUN is the fastest (vs ' + id + ')');
+    eq(speedrun.blocks, 0, 'SPEEDRUN hits no blocks');
+    assert(collector.bonus && collector.coins >= 15, 'COLLECTOR raids the bonus room: ' + JSON.stringify(collector));
+    assert(explorer.bonus, 'EXPLORER takes the hidden warp pipe');
+    assert(allround.secrets >= 1 && allround.items >= 1 && allround.blocks >= 5, 'ALL-ROUND: blocks, power-ups, hidden 1UP: ' + JSON.stringify(allround));
+    assert(hunter.enemies >= 12 && hunter.enemies > speedrun.enemies && hunter.enemies > collector.enemies, 'HUNTER takes out enemies: ' + JSON.stringify(hunter));
+    assert(!cautious.bonus && cautious.frames > allround.frames, 'CAUTIOUS skips the secret pipe and takes its time: ' + JSON.stringify(cautious));
+  });
+
+  test('Autopilot: route overlay data, persona switching and the /A:style switch', () => {
+    const g = new DOS.MarioGame({ autoStart: true });
+    const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 300, persona: 'collector' });
+    for (let i = 0; i < 30; i++) g.step(pilot.next(g));
+    const v = pilot.view(g);
+    eq(v.persona, 'COLLECTOR');
+    assert(v.path.length > 0, 'planned path is exposed');
+    assert(v.target && v.target.label && v.target.w > 0, 'current goal box: ' + JSON.stringify(v.target));
+    eq(pilot.cyclePersona(), 'hunter');
+    eq(pilot.plan.length, 0, 'switching style drops the old plan');
+    pilot.setPersona('nope');
+    eq(pilot.personaId, 'allround');
+    eq(DOS.MarioProgram.personaFromSwitch('HU'), 'hunter');
+    eq(DOS.MarioProgram.personaFromSwitch('all-round'), 'allround');
+    eq(DOS.MarioProgram.personaFromSwitch(''), null);
+    // 叠加层能画出来（品红色点出现在画面上）
+    const gfx = new DOS.Graphics();
+    gfx.setResolution(256, 240);
+    const r = new DOS.MarioRenderer(gfx);
+    g.autopilot = true;
+    pilot.setPersona('collector');
+    for (let i = 0; i < 4; i++) g.step(pilot.next(g));
+    r.aiView = pilot.view(g);
+    r.draw(g);
+    assert(gfx.back.includes(r.index.M), 'overlay drawn in magenta');
+  });
+
+  test('Autopilot: presses start on the title screen and does nothing while paused', () => {
+    const g = new DOS.MarioGame({});
+    const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 50 });
+    for (let i = 0; i < 4 && g.state === 'title'; i++) g.step(pilot.next(g));
+    eq(g.state, 'intro');
+    const p = new DOS.MarioGame({ autoStart: true });
+    p.paused = true;
+    eq(pilot.next(p), {});
+  });
+
+  test('FileSystem: disk activity callback reports the drive (for HDD/FDD LEDs)', () => {
+    const fs = new DOS.FileSystem({ storage: new MemoryStorage() });
+    const seen = [];
+    fs.onActivity = (drive, kind) => seen.push(drive + kind);
+    fs.readText('C:\\README.TXT');
+    fs.writeText('A:\\X.TXT', 'x');
+    fs.list('A:\\');
+    assert(seen.includes('Cr'), 'C: read');
+    assert(seen.includes('Aw'), 'A: write');
+    assert(seen.includes('Ar'), 'A: list');
+  });
+
+  test('Input: virtual keys (touch controls) behave like the physical keyboard; IME keydowns are ignored', async () => {
+    const m = mk();
+    const p = m.input.readLine();
+    for (const ch of 'ver') { m.input.virtualKey('Key' + ch.toUpperCase(), ch, true); m.input.virtualKey('Key' + ch.toUpperCase(), ch, false); }
+    m.input.virtualKey('Enter', 'Enter', true);
+    eq(await p, 'ver');
+    m.input.virtualKey('KeyC', 'c', true, { ctrl: true });
+    assert(m.breakFlag, 'virtual Ctrl+C breaks');
+    m.input.flush();
+    m.input._onKeyDown({ key: 'Unidentified', code: '', keyCode: 229, isComposing: false, preventDefault() {} });
+    eq(m.input.queue.length, 0, 'IME keydown left to the text proxy');
+    m.input.mode = 'program';
+    m.input.virtualKey('ArrowLeft', 'ArrowLeft', true);
+    assert(m.input.isDown('ArrowLeft'), 'held in program mode');
+    m.input.virtualKey('ArrowLeft', 'ArrowLeft', false);
+    assert(!m.input.isDown('ArrowLeft'), 'released');
+  });
+
   root.HTMLDOS_TESTS_LOADED = true;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
