@@ -20,6 +20,8 @@
        Machine     machine.js    集中状态、执行管线、外壳循环、BIOS 自检
        main.js                   浏览器接线（布局、渲染循环、工具栏、无障碍）
 
+  发布新版本时把 <script src="...?v=..."> 中的版本号一起改掉，避免手机浏览器把新页面和旧缓存脚本混用。
+
   免责声明：MARIO.COM 是致敬 NES《超级马里奥兄弟》(1985) 1-1 关卡的非商业
   原创实现，所有像素图与音符均为原创，未使用任何 ROM 或受版权保护的素材文件，
   与任天堂（Nintendo）无任何关联，也未获其认可。MS-DOS 是 Microsoft 的商标，
@@ -141,7 +143,7 @@
         inset 0 1px 0 rgba(255,255,255,.10), inset 0 -2px 6px rgba(0,0,0,.5);
     }
     .monitor::before { /* 屏幕上方的环境光反射 */
-      content: ""; position: absolute; inset: 0; border-radius: 22px; pointer-events: none;
+      content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; border-radius: 22px; pointer-events: none;
       background: linear-gradient(180deg, rgba(255,255,255,.05), transparent 30%);
     }
     .monitor:focus-visible { box-shadow: 0 0 0 1px rgba(85,255,255,.35), 0 0 24px rgba(85,255,255,.12), 0 30px 60px -20px rgba(0,0,0,.8); }
@@ -154,7 +156,7 @@
     .screen canvas[hidden] { display: none; }
     #glow-canvas { display: none; pointer-events: none; mix-blend-mode: screen; opacity: .55; image-rendering: auto; }
     .monitor.crt #glow-canvas { display: block; }
-    .scanlines { position: absolute; inset: 0; pointer-events: none; display: none; }
+    .scanlines { position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; display: none; }
     .monitor.crt .scanlines {
       display: block;
       background:
@@ -243,25 +245,26 @@
     .tkey.macro { color: var(--amber); border-color: rgba(255,176,0,.4); }
     .tkey.pressed, .tkey:active { background: var(--cyan); color: #000; transform: translateY(1px); box-shadow: none; }
     .gamepad {
-      --d: min(36vw, 156px);   /* 十字键边长 */
-      --f: min(15vw, 68px);    /* A/B 键直径 */
+      --d: 132px;   /* 十字键边长（由 main.js 按屏幕尺寸改写） */
+      --f: 58px;    /* A/B 键直径 */
       width: 100%; max-width: 560px; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px;
+      padding: 4px 6px;
       padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
       touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
     }
     .gamepad button { touch-action: none; cursor: pointer; color: #fff; font: 700 14px/1 var(--mono); }
     .dpad { position: relative; width: var(--d); height: var(--d); justify-self: start; }
     .dpad::before { /* 十字底座 */
-      content: ""; position: absolute; inset: calc(var(--d) / 3) 0; border-radius: 12px; background: #1b2030; box-shadow: inset 0 2px 6px rgba(0,0,0,.6);
+      content: ""; position: absolute; top: calc(var(--d) / 3); bottom: calc(var(--d) / 3); left: 0; right: 0; border-radius: 12px; background: #1b2030; box-shadow: inset 0 2px 6px rgba(0,0,0,.6);
     }
-    .dpad::after { content: ""; position: absolute; inset: 0 calc(var(--d) / 3); border-radius: 12px; background: #1b2030; box-shadow: inset 0 2px 6px rgba(0,0,0,.6); }
+    .dpad::after { content: ""; position: absolute; top: 0; bottom: 0; left: calc(var(--d) / 3); right: calc(var(--d) / 3); border-radius: 12px; background: #1b2030; box-shadow: inset 0 2px 6px rgba(0,0,0,.6); }
     .dpad button {
       position: absolute; z-index: 1; width: calc(var(--d) / 3); height: calc(var(--d) / 3); border-radius: 10px;
       background: linear-gradient(180deg, #343c52, #232a3b); border: 1px solid #47506a; box-shadow: 0 3px 0 #0d1018;
     }
     .dpad .up { left: calc(var(--d) / 3); top: 0; } .dpad .down { left: calc(var(--d) / 3); bottom: 0; }
     .dpad .left { left: 0; top: calc(var(--d) / 3); } .dpad .right { right: 0; top: calc(var(--d) / 3); }
-    .face { display: flex; gap: min(3vw, 14px); justify-self: end; align-items: center; }
+    .face { display: flex; gap: 10px; gap: min(3vw, 14px); justify-self: end; align-items: center; }
     .face button {
       width: var(--f); height: var(--f); border-radius: 50%; border: 2px solid rgba(0,0,0,.4); font-size: 20px;
       box-shadow: 0 4px 0 #0d1018, inset 0 2px 0 rgba(255,255,255,.25);
@@ -270,7 +273,8 @@
     .face .a { background: radial-gradient(circle at 35% 30%, #ff6a4a, #d82800); margin-bottom: calc(var(--f) * .45); }
     .mid { display: flex; flex-direction: column; gap: 8px; align-items: center; justify-self: center; }
     .mid button {
-      min-width: min(16vw, 74px); height: 30px; padding: 0 6px; border-radius: 15px; font-size: min(3vw, 11px); letter-spacing: .06em;
+      min-width: 60px; min-width: min(16vw, 74px); height: 30px; padding: 0 6px; border-radius: 15px;
+      font-size: 11px; font-size: min(3vw, 11px); letter-spacing: .06em;
       background: #2a3040; border: 1px solid #47506a; box-shadow: 0 2px 0 #0d1018;
     }
     .mid .auto { color: var(--magenta); border-color: rgba(255,85,255,.45); }
@@ -306,20 +310,17 @@
       body.touch.gaming .stage { padding: 4px; }
       body.touch .gamepad.show {
         position: fixed; z-index: 4; left: 0; right: 0; bottom: 0; max-width: none; pointer-events: none;
+        padding: 0 12px 10px 12px;
         padding: 0 calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
-      }
-      body.touch .gamepad.show {
-        --d: min(calc(var(--gutter, 160px) - 8px), 44vh, 156px);
-        --f: min(calc((var(--gutter, 160px) - 20px) / 2), 20vh, 68px);
       }
       body.touch .gamepad.show > * { pointer-events: auto; opacity: .82; }
       /* START/AUTO/EXIT 放到右上角的空白处，不遮挡画面 */
-      body.touch .gamepad.show .mid { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
+      body.touch .gamepad.show .mid { position: fixed; top: 10px; right: 12px; top: calc(10px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
     }
 
     /* ---------- 帮助面板 ---------- */
     .help {
-      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      position: fixed; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center;
       background: rgba(0,0,0,.6); backdrop-filter: blur(3px); z-index: 10;
     }
     .help[hidden] { display: none; }
@@ -339,6 +340,11 @@
     .help p { margin: 8px 0 0; color: #ccc; font-size: 13px; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
     noscript { display: block; padding: 20px; color: #fff; }
+    .boot-error {
+      position: fixed; z-index: 20; left: 10px; right: 10px; top: 10px; padding: 12px 14px; border-radius: 10px;
+      background: #3a0d0d; color: #ffd7d7; border: 1px solid #ff5555; font: 14px/1.5 system-ui, sans-serif;
+      box-shadow: 0 8px 30px rgba(0,0,0,.6);
+    }
     @media (prefers-reduced-motion: reduce) {
       .monitor.crt .scanlines, .led[data-led="auto"].on i { animation: none; }
       .swatch, .switch .track, .switch .track::after, .meter > span { transition: none; }
@@ -346,6 +352,24 @@
   </style>
 </head>
 <body>
+  <script>
+    /* 启动失败提示（ES5，所有浏览器都能运行）：脚本出错或 5 秒内未启动时显示原因，而不是一片空白 */
+    (function () {
+      var shown = false;
+      function show(msg) {
+        if (shown) return;
+        shown = true;
+        var d = document.createElement('div');
+        d.className = 'boot-error';
+        d.setAttribute('role', 'alert');
+        d.textContent = 'HTML-DOS 无法在此浏览器中启动（' + msg + '）。请用最新版 Chrome / Safari / Edge / Firefox 打开；' +
+          '若在微信/QQ 内，请点右上角“在浏览器中打开”。 HTML-DOS could not start in this browser: ' + msg;
+        document.body.appendChild(d);
+      }
+      window.addEventListener('error', function (e) { if (!window.machine) show(e.message || 'script error'); });
+      setTimeout(function () { if (!window.machine) show('timeout'); }, 5000);
+    })();
+  </script>
   <header class="topbar" role="toolbar" aria-label="Simulator settings">
     <div class="brand">
       <span class="logo" aria-hidden="true">C:\&gt;_</span>
@@ -490,21 +514,21 @@
 
   <div id="sr-live" class="sr-only" aria-live="polite" aria-atomic="false"></div>
 
-  <script src="js/font.js"></script>
-  <script src="js/terminal.js"></script>
-  <script src="js/input.js"></script>
-  <script src="js/filesystem.js"></script>
-  <script src="js/disk-image.js"></script>
-  <script src="js/parser.js"></script>
-  <script src="js/batch.js"></script>
-  <script src="js/commands.js"></script>
-  <script src="js/graphics.js"></script>
-  <script src="js/audio.js"></script>
-  <script src="js/programs.js"></script>
-  <script src="js/mario-data.js"></script>
-  <script src="js/mario.js"></script>
-  <script src="js/mario-ai.js"></script>
-  <script src="js/machine.js"></script>
-  <script src="js/main.js"></script>
+  <script src="js/font.js?v=20261029b"></script>
+  <script src="js/terminal.js?v=20261029b"></script>
+  <script src="js/input.js?v=20261029b"></script>
+  <script src="js/filesystem.js?v=20261029b"></script>
+  <script src="js/disk-image.js?v=20261029b"></script>
+  <script src="js/parser.js?v=20261029b"></script>
+  <script src="js/batch.js?v=20261029b"></script>
+  <script src="js/commands.js?v=20261029b"></script>
+  <script src="js/graphics.js?v=20261029b"></script>
+  <script src="js/audio.js?v=20261029b"></script>
+  <script src="js/programs.js?v=20261029b"></script>
+  <script src="js/mario-data.js?v=20261029b"></script>
+  <script src="js/mario.js?v=20261029b"></script>
+  <script src="js/mario-ai.js?v=20261029b"></script>
+  <script src="js/machine.js?v=20261029b"></script>
+  <script src="js/main.js?v=20261029b"></script>
 </body>
 </html>

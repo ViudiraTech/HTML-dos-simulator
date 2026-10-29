@@ -59,6 +59,11 @@
       const vw = Math.min(root.innerWidth, document.documentElement.clientWidth || root.innerWidth), vh = root.innerHeight;
       const small = vw <= 760 || vh <= 540; // 手机竖屏或横屏
       // 预留顶栏、显示器下巴（指示灯一栏）、触屏按键/手柄、状态 HUD（手机上 HUD 放在下方可滚动，不参与计算）与边距
+      // 手柄尺寸：竖屏按屏幕宽度；横屏玩游戏时按画面两侧留白（下面算出画面宽度后再改写）。
+      // 用 JS 计算而不是 CSS min()，以兼容较老的手机内核（如部分 App 内置浏览器）
+      const padEl = $('gamepad');
+      padEl.style.setProperty('--d', Math.floor(Math.min(vw * 0.36, 156)) + 'px');
+      padEl.style.setProperty('--f', Math.floor(Math.min(vw * 0.15, 68)) + 'px');
       const bar = flowHeight(document.querySelector('.topbar'));
       const chin = flowHeight(document.querySelector('.chin'));
       const hud = touch || small ? 0 : flowHeight($('hud'));
@@ -72,8 +77,12 @@
       const H = Math.floor(W / aspect);
       screen.style.width = W + 'px';
       screen.style.height = H + 'px';
-      // 横屏时手柄悬浮在画面两侧，按两侧留白宽度缩放（见 dos.html 的 --gutter）
-      document.body.style.setProperty('--gutter', Math.max(0, Math.floor((vw - W) / 2 - 12)) + 'px');
+      if (touch && m.display === 'gfx' && vw > vh && vh <= 540) {
+        // 横屏：手柄悬浮在画面两侧的留白里
+        const gutter = Math.max(0, Math.floor((vw - W) / 2 - 12));
+        padEl.style.setProperty('--d', Math.floor(Math.max(72, Math.min(gutter - 8, vh * 0.44, 156))) + 'px');
+        padEl.style.setProperty('--f', Math.floor(Math.max(40, Math.min((gutter - 20) / 2, vh * 0.2, 68))) + 'px');
+      }
       // 文本模式留出少量“过扫描”黑边，避免首列字符贴住圆角显像管边缘
       const pad = Math.round(W * 0.025);
       textCanvas.style.width = (W - pad * 2) + 'px';

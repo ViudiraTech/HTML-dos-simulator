@@ -290,7 +290,8 @@
       }
       // 光标：仅在查看最新输出时显示
       if (term.cursorVisible && blinkOn && term.viewOffset === 0 && term.y < term.rows) {
-        const at = term.attrs[term.y * term.cols + term.x] ?? 7;
+        const ci = term.y * term.cols + term.x;
+        const at = ci < term.attrs.length ? term.attrs[ci] : 7;
         const fg = pal[at & 15];
         const top = term.cursorShape === 'block' ? 0 : term.cursorShape === 'half' ? 8 : 13;
         for (let y = top; y < 15; y++) {

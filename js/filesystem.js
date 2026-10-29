@@ -56,7 +56,7 @@
   };
 
   function makeDir(name, mtime) { return { type: 'dir', name, attr: ATTR.D, mtime, children: new Map() }; }
-  function makeFile(name, mtime, data, binary, attr) { return { type: 'file', name, attr: attr ?? ATTR.A, mtime, data, binary: !!binary }; }
+  function makeFile(name, mtime, data, binary, attr) { return { type: 'file', name, attr: attr === undefined || attr === null ? ATTR.A : attr, mtime, data, binary: !!binary }; }
 
   /** 节点大小（字节） */
   function sizeOf(node) {
