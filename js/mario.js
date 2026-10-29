@@ -119,6 +119,8 @@
       this.lives = this.startLives;
       this.score = 0;
       this.coins = 0;
+      this.nextEnemyId = 1;
+      this.resetStats();
       this.loadLevel();
       if (opts.autoStart) this.startGame(true);
     }
@@ -133,24 +135,38 @@
      * @returns {MarioGame}
      */
     clone() {
+      // 逐字段显式复制（比 Object.assign 快数倍：搜索时每个节点都要克隆一次）。
+      // 新增 MarioGame / 马里奥字段时要同步加到这里，测试“clone 复制了全部字段”会检查。
       const g = Object.create(MarioGame.prototype);
-      Object.assign(g, this);
+      g.data = this.data; g.P = this.P; g.levelDef = this.levelDef;
+      g.hiscore = this.hiscore; g.startLives = this.startLives;
       g.silent = true;
       g.events = [];
+      g.frame = this.frame; g.paused = this.paused; g.state = this.state; g.timer = this.timer;
+      g.lives = this.lives; g.score = this.score; g.coins = this.coins; g.nextEnemyId = this.nextEnemyId;
+      g.time = this.time; g.timeTick = this.timeTick; g.hurry = this.hurry; g.camX = this.camX; g.combo = this.combo;
+      const p = this.prev;
+      g.prev = { left: p.left, right: p.right, up: p.up, down: p.down, a: p.a, b: p.b, start: p.start };
+      g.stats = Object.assign({}, this.stats);
       g.areas = {};
-      for (const id of Object.keys(this.areas)) {
+      for (const id in this.areas) {
         const a = this.areas[id];
         // grid/multi 与原对象共享，直到克隆体修改图块（见 _mutArea）；contents、spawns 只读
         g.areas[id] = Object.assign({}, a, { shared: true });
       }
       g.area = g.areas[this.area.id];
-      g.mario = Object.assign({}, this.mario);
+      const m = this.mario;
+      g.mario = {
+        x: m.x, y: m.y, w: m.w, h: m.h, vx: m.vx, vy: m.vy, big: m.big, facing: m.facing, onGround: m.onGround,
+        jumping: m.jumping, holdJump: m.holdJump, gHold: m.gHold, gFall: m.gFall, airMax: m.airMax, crouch: m.crouch,
+        skid: m.skid, invuln: m.invuln, star: m.star, anim: m.anim, dead: m.dead, hidden: m.hidden, behind: m.behind,
+        prevBottom: m.prevBottom, takeoff: m.takeoff, pit: m.pit
+      };
       g.enemies = this.enemies.map(e => Object.assign({}, e));
       g.items = this.items.map(i => Object.assign({}, i));
       g.effects = [];
       g.bumps = this.bumps.map(b => Object.assign({}, b));
       g.flag = this.flag && Object.assign({}, this.flag);
-      g.prev = Object.assign({}, this.prev);
       g.transform = this.transform && Object.assign({}, this.transform);
       g.pipe = this.pipe && Object.assign({}, this.pipe);
       return g;
@@ -161,11 +177,21 @@
 
     // ---------------- 流程 ----------------
 
+    /**
+     * 行为统计（单调递增），供自动驾驶判断子目标是否达成、HUD 显示。
+     * coins 金币、blocks 顶出内容的方块、bricks 顶碎的砖、items 吃到的道具、
+     * stomps 踩踏、kicks 踢壳、kills 用壳/星星/顶砖击杀、secrets 隐藏方块与奖励房
+     */
+    resetStats() {
+      this.stats = { coins: 0, blocks: 0, bricks: 0, items: 0, stomps: 0, kicks: 0, kills: 0, secrets: 0 };
+    }
+
     /** 开始新游戏 */
     startGame(skipIntro) {
       this.lives = this.startLives;
       this.score = 0;
       this.coins = 0;
+      this.resetStats();
       this.startLevel(skipIntro);
     }
 
@@ -202,7 +228,8 @@
         x, y: bottom - SMALL_H, w: MARIO_W, h: SMALL_H,
         vx: 0, vy: 0, big: false, facing: 1, onGround: true, jumping: false, holdJump: false,
         gHold: this.P.jump[0].hold, gFall: this.P.jump[0].fall, airMax: this.P.maxWalk,
-        crouch: false, skid: false, invuln: 0, star: 0, anim: 0, dead: false, hidden: false, behind: false, prevBottom: 0
+        crouch: false, skid: false, invuln: 0, star: 0, anim: 0, dead: false, hidden: false, behind: false, prevBottom: 0,
+        takeoff: false, pit: false
       };
     }
 
@@ -437,6 +464,8 @@
     _hitBlock(tx, ty) {
       const a = this._mutArea(), t = a.get(tx, ty), key = tx + ',' + ty, content = a.contents.get(key);
       if (t === T.QUESTION || t === T.HIDDEN) {
+        this.stats.blocks++;
+        if (t === T.HIDDEN) this.stats.secrets++;
         a.set(tx, ty, T.USED);
         this._bump(tx, ty);
         this._spawnContent(content || 'coin', tx, ty);
@@ -445,15 +474,18 @@
           const st = a.multi.get(key) || { count: 0, start: this.frame };
           st.count++;
           a.multi.set(key, st);
+          this.stats.blocks++;
           this._bump(tx, ty);
           this._spawnContent('coin', tx, ty);
           if (st.count >= 10 || this.frame - st.start > 240) a.set(tx, ty, T.USED);
         } else if (content) {
+          this.stats.blocks++;
           a.set(tx, ty, T.USED);
           this._bump(tx, ty);
           this._spawnContent(content, tx, ty);
         } else if (this.mario.big) {
           a.set(tx, ty, T.EMPTY);
+          this.stats.bricks++;
           const x = tx * TS, y = ty * TS;
           for (const [dx, dy, vx, vy] of [[0, 0, -1, -5], [8, 0, 1, -5], [0, 8, -1, -3.5], [8, 8, 1, -3.5]]) {
             this.effects.push({ kind: 'debris', x: x + dx, y: y + dy, vx, vy, t: 0 });
@@ -477,12 +509,13 @@
         this._sfx('coin');
       } else {
         const kind = content === '1up' ? 'oneup' : content === 'star' ? 'star' : 'mushroom';
-        this.items.push({ kind, x, y, w: 16, h: 16, vx: this.P.itemSpeed, vy: 0, rising: TS, startY: y });
+        this.items.push({ id: this.nextEnemyId++, kind, x, y, w: 16, h: 16, vx: this.P.itemSpeed, vy: 0, rising: TS, startY: y });
         this._sfx('sprout');
       }
     }
 
     _addCoin() {
+      this.stats.coins++;
       this.coins++;
       if (this.coins >= 100) { this.coins -= 100; this._oneUp(); }
     }
@@ -508,7 +541,7 @@
       while (a.spawnIdx < a.spawns.length && a.spawns[a.spawnIdx].x <= this.camX + SCREEN_W + 16) {
         const s = a.spawns[a.spawnIdx++];
         if (s.x + 16 < this.camX) continue;
-        this.enemies.push({ kind: s.kind, x: s.x, y: s.y, w: 16, h: 16, vx: -this.P.enemySpeed, vy: 0, state: 'walk', timer: 0, grace: 0 });
+        this.enemies.push({ id: this.nextEnemyId++, kind: s.kind, x: s.x, y: s.y, w: 16, h: 16, vx: -this.P.enemySpeed, vy: 0, state: 'walk', timer: 0, grace: 0 });
       }
     }
 
@@ -589,6 +622,7 @@
     /** 击杀敌人（翻转下落） */
     _killEnemy(e, points, shell) {
       if (e.state === 'dead') return;
+      this.stats.kills++;
       e.state = 'dead';
       e.vy = -3;
       e.vx = shell ? Math.sign(e.vx || 1) * 0.6 : 0.6;
@@ -655,6 +689,7 @@
       for (const it of this.items) {
         if (it.rising || !overlap(m, it)) continue;
         it.remove = true;
+        this.stats.items++;
         if (it.kind === 'mushroom') {
           this._addScore(1000);
           this._sfx('powerup');
@@ -676,6 +711,7 @@
         const stomp = m.vy > 0 && m.prevBottom <= e.y + 8;
         if (e.state === 'shell') {
           e.state = 'shellMove';
+          this.stats.kicks++;
           e.vx = (m.x + m.w / 2 < e.x + e.w / 2 ? 1 : -1) * P.shellSpeed;
           e.grace = 12;
           e.combo = 0;
@@ -692,6 +728,7 @@
           if (pts) this._addScore(pts, true, e.x, e.y - 8);
           else { this.effects.push({ kind: 'popup', text: '1UP', x: e.x, y: e.y - 8, t: 0 }); this._oneUp(); }
           this.combo++;
+          this.stats.stomps++;
           this._sfx('stomp');
           this._bounce();
           continue;
@@ -836,6 +873,8 @@
         m.y += 1;
         if (p.t >= 36) {
           this.area = this.areas[p.warp.to];
+          this.area.visited = true;
+          this.stats.secrets++;
           this.camX = 0;
           this.enemies = []; this.items = []; this.effects = [];
           m.x = p.warp.entry.x; m.y = p.warp.entry.y; m.vx = 0; m.vy = 0;
@@ -1004,7 +1043,10 @@
       this.drawWorld(game);
       this.drawHUD(game);
       if (game.state === 'title') this.drawTitle(game);
-      if (game.autopilot && game.state !== 'clear') this.drawAutoBadge(game);
+      if (game.autopilot && game.state !== 'clear') {
+        if (this.aiView && game.state === 'play') this.drawAIOverlay(game, this.aiView);
+        this.drawAutoBadge(game);
+      }
       if (game.state === 'play' && game.paused) {
         g.fillRect(100, 108, 56, 16, this.BLACK);
         g.text('PAUSE', 108, 112, this.WHITE);
@@ -1017,14 +1059,45 @@
       }
     }
 
-    /** 自动驾驶指示：HUD 下方的黑底徽标，左侧小灯闪烁 */
+    /** 自动驾驶指示：HUD 下方右对齐的黑底徽标（当前 AI 风格），左侧小灯闪烁 */
     drawAutoBadge(game) {
-      const g = this.g, x = 176, y = 36;
-      g.fillRect(x, y, 64, 11, this.BLACK);
-      g.rect(x, y, 64, 11, this.index.Y);
+      const g = this.g, name = game.aiStyle || 'AUTO';
+      const w = 14 + name.length * 8, x = SCREEN_W - 16 - w, y = 36;
+      g.fillRect(x, y, w, 11, this.BLACK);
+      g.rect(x, y, w, 11, this.index.Y);
       if ((game.frame >> 4) % 2 === 0) g.fillRect(x + 3, y + 4, 3, 3, this.index.R);
-      g.text('AUTO', x + 10, y + 2, this.index.Y);
-      g.text('P', x + 50, y + 2, this.index.z);
+      g.text(name, x + 10, y + 2, this.index.Y);
+    }
+
+    /**
+     * AI 叠加层：规划路线（每 3 帧一个点，越远越暗）+ 当前子目标的“行军蚁”虚线框和标签。
+     * @param {MarioGame} game
+     * @param {{path:{x:number,y:number}[], target:object|null}} view MarioAutoPilot.view() 的结果
+     */
+    drawAIOverlay(game, view) {
+      const g = this.g, cam = Math.floor(game.camX), M = this.index.M, K = this.BLACK;
+      const pts = view.path;
+      for (let i = 2; i < pts.length; i += 3) {
+        const x = Math.round(pts[i].x) - cam, y = Math.round(pts[i].y);
+        if (i < 90) g.fillRect(x - 1, y - 1, 2, 2, M);
+        else g.pset(x, y, M);
+      }
+      const t = view.target;
+      if (!t) return;
+      const x = Math.round(t.x) - cam - 2, y = Math.round(t.y) - 2, w = t.w + 4, h = t.h + 4;
+      const phase = game.frame >> 2;
+      let i = 0;
+      const ant = (px, py) => g.pset(px, py, ((i++ >> 2) + phase) & 1 ? K : M);
+      for (let px = x; px < x + w; px++) ant(px, y);
+      for (let py = y + 1; py < y + h; py++) ant(x + w - 1, py);
+      for (let px = x + w - 2; px >= x; px--) ant(px, y + h - 1);
+      for (let py = y + h - 2; py > y; py--) ant(x, py);
+      // 目标在画面外时在标签上加 CP437 箭头（0x1A →、0x1B ←）指明方向
+      const label = (x + w <= 0 ? '\x1B ' : '') + (t.label || '') + (x >= SCREEN_W ? ' \x1A' : '');
+      const lx = Math.max(1, Math.min(SCREEN_W - 1 - label.length * 8, x + (w - label.length * 8) / 2));
+      const ly = y >= 60 ? y - 11 : y + h + 2;
+      g.fillRect(lx - 1, ly - 1, label.length * 8 + 2, 10, K);
+      g.text(label, lx, ly, M);
     }
 
     drawTitle(game) {
@@ -1219,6 +1292,7 @@
   // ==================================================================
 
   const HISCORE_KEY = 'htmldos.mario.hiscore';
+  const PREFS_KEY = 'htmldos.mario.ai';
 
   const MarioProgram = {
     /** 键盘映射（KeyboardEvent.code） */
@@ -1231,8 +1305,32 @@
       b: ['KeyX', 'ShiftLeft', 'ShiftRight'],
       start: ['Enter', 'NumpadEnter']
     },
-    /** 自动驾驶开关键 */
+    /** 自动驾驶开关键 / 切换 AI 风格 / 显示 AI 路线叠加层 */
     AUTO_KEY: 'KeyP',
+    STYLE_KEY: 'KeyC',
+    OVERLAY_KEY: 'KeyV',
+
+    /**
+     * 解析 /A:风格 开关：接受人格 ID 或显示名的前缀（如 /A:COLL、/A:SPEEDRUN、/A:ALL-ROUND）。
+     * @returns {string|null} 人格 ID
+     */
+    personaFromSwitch(v) {
+      const want = String(v || '').toLowerCase().replace(/[^a-z]/g, '');
+      if (!want) return null;
+      const P = DOS.MarioAutoPilot.PERSONAS;
+      for (const id of DOS.MarioAutoPilot.PERSONA_ORDER) {
+        if (id.startsWith(want) || P[id].name.toLowerCase().replace(/[^a-z]/g, '').startsWith(want)) return id;
+      }
+      return null;
+    },
+
+    loadPrefs(m) {
+      try { return JSON.parse((m.storage && m.storage.getItem(PREFS_KEY)) || '{}') || {}; } catch (e) { return {}; }
+    },
+
+    savePrefs(m, prefs) {
+      try { if (m.storage) m.storage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* 忽略 */ }
+    },
 
     loadHiscore(m) {
       try { return +((m.storage && m.storage.getItem(HISCORE_KEY)) || 0) || 0; } catch (e) { return 0; }
@@ -1255,17 +1353,37 @@
       const renderer = new MarioRenderer(m.gfx);
       renderer.setupPalette();
       const game = new MarioGame({ hiscore: this.loadHiscore(m) });
-      const pilot = new DOS.MarioAutoPilot();
+      const prefs = this.loadPrefs(m);
+      const pilot = new DOS.MarioAutoPilot({ persona: this.personaFromSwitch(sw.A) || prefs.persona });
       this.current = game; // 调试句柄（浏览器控制台：DOS.MarioProgram.current）
       this.pilot = pilot;
       game.autopilot = sw.A !== undefined;
+      game.aiOverlay = prefs.overlay !== false;
+      game.aiStyle = pilot.persona.name;
+      const save = () => this.savePrefs(m, { persona: pilot.personaId, overlay: game.aiOverlay });
       const toggleAuto = () => {
         game.autopilot = !game.autopilot;
         pilot.reset();
         Audio.sfx(game.autopilot ? 'oneup' : 'bump');
-        m.announce(game.autopilot ? 'Autopilot on.' : 'Autopilot off.');
+        m.announce(game.autopilot ? `Autopilot on, ${pilot.persona.name} style.` : 'Autopilot off.');
       };
-      this.toggleAuto = toggleAuto; // 供页面 HUD 上的开关调用
+      const setPersona = (id) => {
+        if (id) pilot.setPersona(id); else pilot.cyclePersona();
+        game.aiStyle = pilot.persona.name;
+        save();
+        Audio.sfx('coin');
+        m.announce(`AI style: ${pilot.persona.name}.`);
+      };
+      const toggleOverlay = () => {
+        game.aiOverlay = !game.aiOverlay;
+        save();
+        Audio.sfx('bump');
+        m.announce(game.aiOverlay ? 'AI route overlay on.' : 'AI route overlay off.');
+      };
+      // 供页面 HUD 上的开关调用
+      this.toggleAuto = toggleAuto;
+      this.setPersona = setPersona;
+      this.toggleOverlay = toggleOverlay;
       m.announce('MARIO started. Press Enter to start, Escape to quit.');
       const STEP = 1000 / 60;
       let acc = 0;
@@ -1297,6 +1415,8 @@
           while ((ev = m.input.pollKey())) {
             if (ev.key === 'Escape' || ev.key === 'Break') quit = true;
             else if (ev.code === this.AUTO_KEY) toggleAuto();
+            else if (ev.code === this.STYLE_KEY) setPersona();
+            else if (ev.code === this.OVERLAY_KEY) toggleOverlay();
             if (ev.code) tapped.add(ev.code);
           }
           if (m.breakFlag) quit = true;
@@ -1318,6 +1438,7 @@
             for (const k of Object.keys(this.KEYS)) input[k] = this.KEYS[k].some(c => m.input.isDown(c));
           }
           if (acc > STEP * 5) acc = 0;
+          renderer.aiView = game.autopilot && game.aiOverlay ? pilot.view(game) : null;
           renderer.draw(game);
           m.gfx.swap();
         }
@@ -1325,6 +1446,8 @@
         this.current = null;
         this.pilot = null;
         this.toggleAuto = null;
+        this.setPersona = null;
+        this.toggleOverlay = null;
         Audio.stopMusic();
         game.hiscore = Math.max(game.hiscore, game.score);
         this.saveHiscore(m, game.hiscore);

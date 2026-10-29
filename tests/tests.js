@@ -856,6 +856,17 @@
     eq(fresh.coins, 0);
   });
 
+  test('MarioGame.clone: copies every field of the game and of Mario', () => {
+    const g = new DOS.MarioGame({ autoStart: true });
+    for (let i = 0; i < 120; i++) g.step({ right: true, b: true, a: i % 40 < 20 });
+    g.transform = { kind: 'grow', t: 1 };
+    const c = g.clone();
+    for (const k of Object.keys(g)) assert(k in c, 'game field ' + k + ' is cloned');
+    for (const k of Object.keys(g.mario)) assert(k in c.mario, 'mario field ' + k + ' is cloned');
+    for (const k of Object.keys(g.mario)) eq(c.mario[k], g.mario[k], 'mario.' + k);
+    assert(c.transform !== g.transform && c.transform.kind === 'grow');
+  });
+
   test('Autopilot: clears World 1-1 without losing a life', () => {
     const g = new DOS.MarioGame({ lives: 3 });
     const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 200 });
@@ -884,6 +895,60 @@
     }
     assert(sawMain, 'left the bonus room through the side pipe');
     eq(g.state, 'clear');
+  });
+
+  test('Autopilot personas: every AI style clears 1-1 without dying, each in its own way', () => {
+    const run = {};
+    for (const id of DOS.MarioAutoPilot.PERSONA_ORDER) {
+      const g = new DOS.MarioGame({ lives: 3 });
+      const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 300, persona: id });
+      let deaths = 0, prev = g.state, bonus = false, f = 0;
+      for (; f < 60 * 60 * 3 && g.state !== 'clear'; f++) {
+        g.step(pilot.next(g));
+        if (g.state === 'dying' && prev !== 'dying') deaths++;
+        if (g.area.id === 'bonus') bonus = true;
+        prev = g.state;
+      }
+      eq(g.state, 'clear', id + ' clears the level');
+      eq(deaths, 0, id + ' never dies');
+      const s = g.stats;
+      run[id] = { frames: f, bonus, coins: g.coins, blocks: s.blocks, items: s.items, secrets: s.secrets, enemies: s.stomps + s.kicks + s.kills };
+    }
+    const { allround, speedrun, collector, hunter, explorer, cautious } = run;
+    for (const id of Object.keys(run)) if (id !== 'speedrun') assert(speedrun.frames < run[id].frames, 'SPEEDRUN is the fastest (vs ' + id + ')');
+    eq(speedrun.blocks, 0, 'SPEEDRUN hits no blocks');
+    assert(collector.bonus && collector.coins >= 15, 'COLLECTOR raids the bonus room: ' + JSON.stringify(collector));
+    assert(explorer.bonus, 'EXPLORER takes the hidden warp pipe');
+    assert(allround.secrets >= 1 && allround.items >= 1 && allround.blocks >= 5, 'ALL-ROUND: blocks, power-ups, hidden 1UP: ' + JSON.stringify(allround));
+    assert(hunter.enemies >= 12 && hunter.enemies > speedrun.enemies && hunter.enemies > collector.enemies, 'HUNTER takes out enemies: ' + JSON.stringify(hunter));
+    assert(!cautious.bonus && cautious.frames > allround.frames, 'CAUTIOUS skips the secret pipe and takes its time: ' + JSON.stringify(cautious));
+  });
+
+  test('Autopilot: route overlay data, persona switching and the /A:style switch', () => {
+    const g = new DOS.MarioGame({ autoStart: true });
+    const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 300, persona: 'collector' });
+    for (let i = 0; i < 30; i++) g.step(pilot.next(g));
+    const v = pilot.view(g);
+    eq(v.persona, 'COLLECTOR');
+    assert(v.path.length > 0, 'planned path is exposed');
+    assert(v.target && v.target.label && v.target.w > 0, 'current goal box: ' + JSON.stringify(v.target));
+    eq(pilot.cyclePersona(), 'hunter');
+    eq(pilot.plan.length, 0, 'switching style drops the old plan');
+    pilot.setPersona('nope');
+    eq(pilot.personaId, 'allround');
+    eq(DOS.MarioProgram.personaFromSwitch('HU'), 'hunter');
+    eq(DOS.MarioProgram.personaFromSwitch('all-round'), 'allround');
+    eq(DOS.MarioProgram.personaFromSwitch(''), null);
+    // 叠加层能画出来（品红色点出现在画面上）
+    const gfx = new DOS.Graphics();
+    gfx.setResolution(256, 240);
+    const r = new DOS.MarioRenderer(gfx);
+    g.autopilot = true;
+    pilot.setPersona('collector');
+    for (let i = 0; i < 4; i++) g.step(pilot.next(g));
+    r.aiView = pilot.view(g);
+    r.draw(g);
+    assert(gfx.back.includes(r.index.M), 'overlay drawn in magenta');
   });
 
   test('Autopilot: presses start on the title screen and does nothing while paused', () => {
