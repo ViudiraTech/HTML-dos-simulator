@@ -17,7 +17,8 @@
 | 本地服务器 | `npx http-server .` 或 `python3 -m http.server`，再打开 `/dos.html`。 |
 
 启动后会显示模拟 BIOS 自检（按 **Esc** 跳过），随后执行 `AUTOEXEC.BAT` 并进入 `C:\>` 提示符。
-输入 `MARIO` 回车即可开始游戏（`MARIO /M` 关闭背景音乐，`MARIO /?` 查看按键）。
+输入 `MARIO` 回车即可开始游戏（`MARIO /M` 关闭背景音乐，`MARIO /A` 开局即开启自动通关，`MARIO /?` 查看按键）。
+游戏中按 **P** 随时开关自动通关。
 
 支持最新版 Chrome、Firefox、Safari、Edge。音频在首次按键/点击后启用（浏览器自动播放限制）。
 
@@ -26,6 +27,11 @@
 **文本模式**：80×25、16 色 CGA/EGA 调色板、9×16 字符单元的位图字体（8×8 字形 + 程序生成的 CP437
 制表/方块字形）；闪烁块状光标（Insert 切换插入/覆盖，覆盖模式为下划线光标）；1000 行滚动缓冲；
 可选 CRT 效果（扫描线、光晕、暗角）；4 种主题（Classic VGA 灰 `#AAAAAA`/黑、Green、Amber、Blue）。
+
+**页面 HUD**：顶栏有主题色板、CRT 开关、帮助与出厂重置；显示器下方有铭牌、电源/硬盘/软驱/AUTO 指示灯
+（硬盘和软驱灯随真实的虚拟磁盘读写闪烁）、“消磁”（切换 CRT）与“电源”（重启，文件保留）按钮；
+最下方的状态栏显示视频模式、当前目录、INS/OVR 与 CAPS、DOS 时钟、C: 剩余空间。
+运行 MARIO 时会出现游戏面板：分数、金币、生命、时间、自动通关开关与规划器实时统计。
 
 **行编辑**：←/→（Ctrl 按词）、Home/End、Backspace/Delete、Insert、↑/↓ 历史（100 条）、F1/F3（逐字/整行
 复制上一条命令）、Tab/Shift+Tab 补全命令与文件名并循环候选、Esc 清行、Ctrl+C 中止、F6/Ctrl+Z 输入 ^Z、
@@ -72,6 +78,7 @@ JS API（`machine.gfx`）：`pset`/`pget`、`line`（Bresenham）、`rect`、`fi
 | Z 或 Space | 跳跃（A 键，按住跳得更高） |
 | X 或 Shift | 奔跑（B 键） |
 | Enter | 开始 / 暂停（显示 `PAUSE`） |
+| P | 自动通关开 / 关（画面右上显示 `AUTO` 徽标，页面 HUD 上也有开关） |
 | Esc | 退出回到 DOS |
 
 - **分辨率取舍**：使用 NES 原生 256×240 的 256 色索引缓冲（`MODE 13` 风格的调色板与绘图 API），由界面层整数倍缩放、
@@ -90,6 +97,22 @@ JS API（`machine.gfx`）：`pset`/`pget`、`line`（Bresenham）、`rect`、`fi
   最高分保存在 `localStorage`（`htmldos.mario.hiscore`）。
 - **音频**：Web Audio 方波/三角波合成：跳跃、踩踏、金币、蘑菇出现、变大、1UP、顶砖、碎砖、踢壳、受伤、死亡、
   旗杆、过关、暂停、时间警告；原创的 8 小节背景音乐（主旋律 + 和声 + 三角波低音），时间少于 100 时加速。
+
+### 自动通关（Autopilot）
+
+按 **P**（或页面 HUD 上的 Autopilot 开关、或 `MARIO /A`）后由 `js/mario-ai.js` 中的规划器代打，
+玩家仍可用 Enter 暂停、Esc 退出。实现参考了成熟方案——2009 年 Mario AI Competition 冠军
+Robin Baumgarten 的 A* 智能体（[源码镜像](https://github.com/jumoel/mario-astar-robinbaumgarten)）：
+
+- **前向模型**：`MarioGame.clone()` 复制游戏状态（区域图块写时复制），用游戏自己的物理代码推进；
+  游戏是确定性的，所以预测与实际完全一致。
+- **A\* 搜索**：动作集为 {左/右/不动} × {跳} × {跑}，每个节点重复同一动作 2 帧；
+  优先级 = 已用帧数 × 0.9 + 剩余距离按“从当前速度加速到最高速”估算的帧数 + 前方墙体还需爬升的高度；
+  死亡（敌人、掉坑）分支直接剪掉，受伤加大惩罚；相同状态（位置/速度/A 键状态）只展开一次；节点惰性模拟。
+- **计划延续**：计划执行期间保留，剩余不足 12 帧时从计划末尾的预测状态继续搜索并拼接；
+  找不到安全延续时从当前状态整体重新规划。每次搜索限 300 个节点 / 6 ms，不影响 60fps。
+- 在测试中，规划器从起点无伤通关 1-1（也能从地下奖励房出发走出侧向水管并到达旗杆）。
+  它不会主动进入水管、不刻意收集金币或蘑菇，目标只是安全、快速地抵达旗杆。
 
 ### 与原版的已知差异
 
@@ -116,14 +139,14 @@ JS API（`machine.gfx`）：`pset`/`pget`、`line`（Bresenham）、`rect`、`fi
 | Graphics | `js/graphics.js` | 索引色帧缓冲、256 色调色板、绘图原语、双缓冲 |
 | Audio | `js/audio.js` | BEEP、音效表、乐句与循环音乐合成 |
 | Programs | `js/programs.js` | 外部程序注册表：COMMAND、PLASMA、BALL、MARIO |
-| MarioGame | `js/mario.js`、`js/mario-data.js` | `MarioGame`（状态与物理）、`MarioRenderer`（只读渲染）、`MarioProgram`（宿主循环）；精灵/关卡/物理/音乐数据 |
+| MarioGame | `js/mario.js`、`js/mario-data.js`、`js/mario-ai.js` | `MarioGame`（状态与物理，可 `clone()`）、`MarioRenderer`（只读渲染）、`MarioProgram`（宿主循环）；精灵/关卡/物理/音乐数据；`MarioAutoPilot`（A* 自动通关） |
 | Machine | `js/machine.js` | 集中状态、执行管线、外壳循环、显示模式切换、BIOS 自检 |
-| — | `js/font.js`、`js/main.js` | 位图字体；浏览器接线（布局、渲染循环、工具栏、帮助面板、aria-live） |
+| — | `js/font.js`、`js/main.js` | 位图字体；浏览器接线（布局、渲染循环、顶栏、状态 HUD、指示灯、帮助面板、aria-live） |
 
 ## 测试
 
 ```bash
-node tests/run-tests.js            # 全部 57 项（无依赖，Node 18+）
+node tests/run-tests.js            # 全部 62 项（无依赖，Node 18+）
 node tests/run-tests.js Mario      # 按名称过滤
 ```
 
@@ -149,6 +172,7 @@ node tests/run-tests.js Mario      # 按名称过滤
 | 刷新页面后文件保留、最高分保留；`FORMAT` 后磁盘清空（`/S` 写回系统文件） | ✅ 通过 |
 | 含 `IF`、`GOTO`、`FOR`、`CALL`、`CHOICE` 的批处理（`DEMO hello world`）正确执行，`FOREVER.BAT` 用 Ctrl+C → Y 中止 | ✅ 通过 |
 | 主题切换、CRT 开关、F12 帮助面板、窄屏横向滚动、无 JS 控制台错误、`file://` 直接打开 | ✅ 通过 |
+| 自动通关：`MARIO /A` 在浏览器中实时跑完 1-1（不丢命），P 键与 HUD 开关都能切换；硬盘/软驱指示灯随磁盘访问闪烁 | ✅ 通过（Chromium，2026-10-29） |
 | 音频（BEEP、音效、音乐）的实际听感 | ⚠️ 未自动验证：无头浏览器无音频输出，仅确认代码路径无报错；Firefox/Safari/Edge 未实机测试 |
 
 ## 已知限制
