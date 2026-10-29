@@ -908,5 +908,23 @@
     assert(seen.includes('Ar'), 'A: list');
   });
 
+  test('Input: virtual keys (touch controls) behave like the physical keyboard; IME keydowns are ignored', async () => {
+    const m = mk();
+    const p = m.input.readLine();
+    for (const ch of 'ver') { m.input.virtualKey('Key' + ch.toUpperCase(), ch, true); m.input.virtualKey('Key' + ch.toUpperCase(), ch, false); }
+    m.input.virtualKey('Enter', 'Enter', true);
+    eq(await p, 'ver');
+    m.input.virtualKey('KeyC', 'c', true, { ctrl: true });
+    assert(m.breakFlag, 'virtual Ctrl+C breaks');
+    m.input.flush();
+    m.input._onKeyDown({ key: 'Unidentified', code: '', keyCode: 229, isComposing: false, preventDefault() {} });
+    eq(m.input.queue.length, 0, 'IME keydown left to the text proxy');
+    m.input.mode = 'program';
+    m.input.virtualKey('ArrowLeft', 'ArrowLeft', true);
+    assert(m.input.isDown('ArrowLeft'), 'held in program mode');
+    m.input.virtualKey('ArrowLeft', 'ArrowLeft', false);
+    assert(!m.input.isDown('ArrowLeft'), 'released');
+  });
+
   root.HTMLDOS_TESTS_LOADED = true;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
