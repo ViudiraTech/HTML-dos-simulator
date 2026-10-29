@@ -140,10 +140,32 @@
       if (DOS.MarioProgram.toggleAuto) DOS.MarioProgram.toggleAuto();
       refocus();
     });
+    $('btn-overlay').addEventListener('click', () => {
+      if (DOS.MarioProgram.toggleOverlay) DOS.MarioProgram.toggleOverlay();
+      refocus();
+    });
+    // AI 风格选择（人格）：按钮由 PERSONAS 生成
+    const chips = DOS.MarioAutoPilot.PERSONA_ORDER.map((id) => {
+      const P = DOS.MarioAutoPilot.PERSONAS[id];
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.dataset.persona = id;
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', 'false');
+      b.textContent = P.name;
+      b.title = P.desc;
+      b.addEventListener('click', () => {
+        if (DOS.MarioProgram.setPersona) DOS.MarioProgram.setPersona(id);
+        refocus();
+      });
+      $('hud-personas').appendChild(b);
+      return b;
+    });
     $('btn-help').addEventListener('click', () => { toggleHelp(); });
     $('btn-reset').addEventListener('click', () => {
       if (!root.confirm('Erase the virtual disks, settings and high score, then reboot?')) { refocus(); return; }
-      try { for (const k of ['htmldos.fs.v1', 'htmldos.settings', 'htmldos.mario.hiscore']) storage && storage.removeItem(k); } catch (e) { /* 忽略 */ }
+      try { for (const k of ['htmldos.fs.v1', 'htmldos.settings', 'htmldos.mario.hiscore', 'htmldos.mario.ai']) storage && storage.removeItem(k); } catch (e) { /* 忽略 */ }
       root.location.reload();
     });
     $('help-close').addEventListener('click', () => toggleHelp(false));
@@ -172,6 +194,7 @@
 
     const pad2 = (n) => String(n).padStart(2, '0');
     const setText = (id, text) => { const el = $(id); if (el.textContent !== text) el.textContent = text; };
+    const setHtml = (id, html) => { const el = $(id); if (el.innerHTML !== html) el.innerHTML = html; };
     let gameShown = false, lastFreeCheck = 0;
     function updateHud() {
       const g = DOS.MarioProgram.current;
@@ -201,10 +224,15 @@
         setText('hud-lives', g.lives <= 5 ? '\u2665'.repeat(Math.max(0, g.lives)) || '\u2013' : '\u2665 \u00D7' + g.lives);
         setText('hud-time', String(g.time).padStart(3, '0'));
         $('btn-auto').setAttribute('aria-checked', String(!!g.autopilot));
+        $('btn-overlay').setAttribute('aria-checked', String(!!g.aiOverlay));
         const p = DOS.MarioProgram.pilot;
-        setText('hud-ai', g.autopilot && p
-          ? `A* ${p.stats.lastNodes} nodes \u00B7 ${p.stats.lastMs.toFixed(1)} ms\nplan ${p.plan.length} ticks \u00B7 ${p.stats.searches} searches`
-          : 'A* idle \u2014 press P');
+        if (p) for (const b of chips) b.setAttribute('aria-checked', String(b.dataset.persona === p.personaId));
+        const s = g.stats;
+        const goal = g.autopilot && p && p.target ? p.target.label : '';
+        setHtml('hud-ai', (g.autopilot && p
+          ? `goal <b>${goal || '\u2014'}</b>\nA* ${p.stats.lastNodes} nodes \u00B7 ${p.stats.lastMs.toFixed(1)} ms`
+          : `${p ? p.persona.name : 'A*'} idle \u2014 press P`)
+          + `\n? ${s.blocks}  stomp ${s.stomps + s.kicks}  secret ${s.secrets}`);
       }
     }
     setInterval(updateHud, 200);

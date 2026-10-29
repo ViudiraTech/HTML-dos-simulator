@@ -221,7 +221,17 @@
     .game .stat { text-align: center; }
     .game .stat .v { font-size: 17px; }
     .hearts { color: var(--red); letter-spacing: 2px; text-shadow: 0 0 8px rgba(255,85,85,.6); }
-    .game .ai { font: 11px/1.35 var(--mono); color: var(--muted); min-width: 170px; white-space: pre; }
+    .game .ai { font: 11px/1.4 var(--mono); color: var(--muted); min-width: 190px; white-space: pre; }
+    .game .ai b { color: var(--magenta); font-weight: 600; }
+    .aibox { display: flex; flex-direction: column; gap: 6px; }
+    .aibox .row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px; max-width: 290px; }
+    .chip {
+      cursor: pointer; font: 600 10px/20px var(--mono); letter-spacing: .04em; padding: 0 7px; border-radius: 10px;
+      background: #222837; color: #9aa3b5; border: 1px solid #333b4d; transition: background .12s, color .12s;
+    }
+    .chip:hover { border-color: var(--magenta); color: #fff; }
+    .chip[aria-checked="true"] { color: #000; background: var(--magenta); border-color: var(--magenta); box-shadow: 0 0 8px rgba(255,85,255,.5); }
 
     /* ---------- 触屏：软键盘代理、按键条、手柄 ---------- */
     #kbd-proxy {
@@ -278,6 +288,7 @@
       background: #2a3040; border: 1px solid #47506a; box-shadow: 0 2px 0 #0d1018;
     }
     .mid .auto { color: var(--magenta); border-color: rgba(255,85,255,.45); }
+    .mid .style { color: var(--cyan); border-color: rgba(85,255,255,.45); }
     .mid .exit { color: var(--red); border-color: rgba(255,85,85,.45); }
     .gamepad button.pressed { filter: brightness(1.45); transform: translateY(2px); box-shadow: none; }
 
@@ -439,6 +450,7 @@
       <div class="mid">
         <button type="button" data-code="Enter" data-key="Enter">START</button>
         <button type="button" class="auto" data-code="KeyP" data-key="p">AUTO</button>
+        <button type="button" class="style" data-code="KeyC" data-key="c" aria-label="Next AI style">STYLE</button>
         <button type="button" class="exit" data-code="Escape" data-key="Escape">EXIT</button>
       </div>
       <div class="face">
@@ -458,7 +470,13 @@
         <div class="stat"><div class="k">Coins</div><div class="v" id="hud-coins">00</div></div>
         <div class="stat"><div class="k">Lives</div><div class="v hearts" id="hud-lives">&hearts;&hearts;&hearts;</div></div>
         <div class="stat"><div class="k">Time</div><div class="v" id="hud-time">400</div></div>
-        <button type="button" class="switch amber" id="btn-auto" role="switch" aria-checked="false"><span class="track" aria-hidden="true"></span>Autopilot <kbd>P</kbd></button>
+        <div class="aibox">
+          <div class="row">
+            <button type="button" class="switch amber" id="btn-auto" role="switch" aria-checked="false"><span class="track" aria-hidden="true"></span>Autopilot <kbd>P</kbd></button>
+            <button type="button" class="switch" id="btn-overlay" role="switch" aria-checked="true"><span class="track" aria-hidden="true"></span>Route <kbd>V</kbd></button>
+          </div>
+          <div class="chips" id="hud-personas" role="radiogroup" aria-label="AI style (C cycles)"></div>
+        </div>
         <div class="ai" id="hud-ai">A* idle</div>
       </div>
     </section>
@@ -497,13 +515,15 @@
         <tr><td>X or Shift</td><td>Run</td></tr>
         <tr><td>Enter</td><td>Start / pause</td></tr>
         <tr><td>P</td><td>Autopilot on / off (A* planner plays for you; MARIO /A starts with it on)</td></tr>
+        <tr><td>C</td><td>Next AI style: ALL-ROUND, SPEEDRUN, COLLECTOR, HUNTER, EXPLORER, CAUTIOUS (MARIO /A:HUNTER picks one)</td></tr>
+        <tr><td>V</td><td>Show / hide the AI route overlay (planned path and current goal)</td></tr>
       </table>
       <h3>Phones and tablets</h3>
       <table>
         <tr><td>Tap the screen</td><td>Open the soft keyboard (or the &#9000; key)</td></tr>
         <tr><td>Key bar</td><td>Esc, Tab, Ctrl+C, arrows, Backspace, F3, Enter and quick commands</td></tr>
         <tr><td>Swipe on screen</td><td>Scroll back through earlier output</td></tr>
-        <tr><td>Gamepad</td><td>Shown in graphics programs: D-pad, A = jump, B = run, START, AUTO, EXIT</td></tr>
+        <tr><td>Gamepad</td><td>Shown in graphics programs: D-pad, A = jump, B = run, START, AUTO, STYLE, EXIT</td></tr>
         <tr><td>Touch switch</td><td>Top bar: force the on-screen controls on or off</td></tr>
         <tr><td>Esc</td><td>Quit to DOS &nbsp;(MARIO /M = no music)</td></tr>
       </table>
@@ -514,21 +534,21 @@
 
   <div id="sr-live" class="sr-only" aria-live="polite" aria-atomic="false"></div>
 
-  <script src="js/font.js?v=20261029b"></script>
-  <script src="js/terminal.js?v=20261029b"></script>
-  <script src="js/input.js?v=20261029b"></script>
-  <script src="js/filesystem.js?v=20261029b"></script>
-  <script src="js/disk-image.js?v=20261029b"></script>
-  <script src="js/parser.js?v=20261029b"></script>
-  <script src="js/batch.js?v=20261029b"></script>
-  <script src="js/commands.js?v=20261029b"></script>
-  <script src="js/graphics.js?v=20261029b"></script>
-  <script src="js/audio.js?v=20261029b"></script>
-  <script src="js/programs.js?v=20261029b"></script>
-  <script src="js/mario-data.js?v=20261029b"></script>
-  <script src="js/mario.js?v=20261029b"></script>
-  <script src="js/mario-ai.js?v=20261029b"></script>
-  <script src="js/machine.js?v=20261029b"></script>
-  <script src="js/main.js?v=20261029b"></script>
+  <script src="js/font.js?v=20261029c"></script>
+  <script src="js/terminal.js?v=20261029c"></script>
+  <script src="js/input.js?v=20261029c"></script>
+  <script src="js/filesystem.js?v=20261029c"></script>
+  <script src="js/disk-image.js?v=20261029c"></script>
+  <script src="js/parser.js?v=20261029c"></script>
+  <script src="js/batch.js?v=20261029c"></script>
+  <script src="js/commands.js?v=20261029c"></script>
+  <script src="js/graphics.js?v=20261029c"></script>
+  <script src="js/audio.js?v=20261029c"></script>
+  <script src="js/programs.js?v=20261029c"></script>
+  <script src="js/mario-data.js?v=20261029c"></script>
+  <script src="js/mario.js?v=20261029c"></script>
+  <script src="js/mario-ai.js?v=20261029c"></script>
+  <script src="js/machine.js?v=20261029c"></script>
+  <script src="js/main.js?v=20261029c"></script>
 </body>
 </html>
