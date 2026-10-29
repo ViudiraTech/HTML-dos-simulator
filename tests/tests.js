@@ -832,5 +832,81 @@
     assert(g.coins > 0, 'collected bonus coins on the way');
   });
 
+  // ==================================================================
+  // 自动驾驶（A* 前向模型）
+  // ==================================================================
+
+  test('MarioGame.clone: deterministic forward model, isolated from the original', () => {
+    const g = new DOS.MarioGame({ autoStart: true });
+    for (let i = 0; i < 120; i++) g.step({ right: true, b: true });
+    const c = g.clone();
+    const inputs = [];
+    for (let i = 0; i < 200; i++) inputs.push({ right: true, b: i % 3 !== 0, a: i % 40 < 20 });
+    const a = g.clone(), b = g.clone();
+    for (const inp of inputs) { a.step(inp); b.step(inp); }
+    eq([a.mario.x, a.mario.y, a.score, a.enemies.length, a.state], [b.mario.x, b.mario.y, b.score, b.enemies.length, b.state], 'same inputs give the same result');
+    eq(c.events.length, 0, 'clones are silent');
+    // 克隆体顶问号块不影响原游戏（写时复制）
+    const fresh = new DOS.MarioGame({ autoStart: true });
+    const fc = fresh.clone();
+    fc.mario.x = 16 * 16 + 2;
+    for (let i = 0; i < 40; i++) fc.step({ a: true });
+    eq(fc.area.get(16, 9), DOS.MarioTiles.USED, 'clone hit the ? block');
+    eq(fresh.area.get(16, 9), DOS.MarioTiles.QUESTION, 'original untouched');
+    eq(fresh.coins, 0);
+  });
+
+  test('Autopilot: clears World 1-1 without losing a life', () => {
+    const g = new DOS.MarioGame({ lives: 3 });
+    const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 200 });
+    let deaths = 0, prev = g.state;
+    for (let f = 0; f < 60 * 60 * 3 && g.state !== 'clear'; f++) {
+      g.step(pilot.next(g));
+      if (g.state === 'dying' && prev !== 'dying') deaths++;
+      prev = g.state;
+    }
+    eq(g.state, 'clear');
+    eq(deaths, 0, 'no deaths');
+    eq(g.lives, 3);
+    assert(pilot.stats.searches > 0 && pilot.stats.nodes > 0);
+  });
+
+  test('Autopilot: finds the way out of the bonus room and still reaches the flag', () => {
+    const g = new DOS.MarioGame({ lives: 1, autoStart: true });
+    g.area = g.areas.bonus; g.camX = 0; g.enemies = [];
+    g.mario.x = 34; g.mario.y = 16;
+    const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 200 });
+    let sawMain = false;
+    for (let f = 0; f < 60 * 60 * 2 && g.state !== 'clear'; f++) {
+      g.step(pilot.next(g));
+      if (g.area.id === 'main') sawMain = true;
+      assert(g.state !== 'dying', 'autopilot died at x=' + Math.round(g.mario.x));
+    }
+    assert(sawMain, 'left the bonus room through the side pipe');
+    eq(g.state, 'clear');
+  });
+
+  test('Autopilot: presses start on the title screen and does nothing while paused', () => {
+    const g = new DOS.MarioGame({});
+    const pilot = new DOS.MarioAutoPilot({ budgetMs: Infinity, maxNodes: 50 });
+    for (let i = 0; i < 4 && g.state === 'title'; i++) g.step(pilot.next(g));
+    eq(g.state, 'intro');
+    const p = new DOS.MarioGame({ autoStart: true });
+    p.paused = true;
+    eq(pilot.next(p), {});
+  });
+
+  test('FileSystem: disk activity callback reports the drive (for HDD/FDD LEDs)', () => {
+    const fs = new DOS.FileSystem({ storage: new MemoryStorage() });
+    const seen = [];
+    fs.onActivity = (drive, kind) => seen.push(drive + kind);
+    fs.readText('C:\\README.TXT');
+    fs.writeText('A:\\X.TXT', 'x');
+    fs.list('A:\\');
+    assert(seen.includes('Cr'), 'C: read');
+    assert(seen.includes('Aw'), 'A: write');
+    assert(seen.includes('Ar'), 'A: list');
+  });
+
   root.HTMLDOS_TESTS_LOADED = true;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
