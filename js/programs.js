@@ -170,9 +170,10 @@
     help: [
       'MARIO.COM - a World 1-1 tribute platform game (Mode 13h, 256 colours).',
       '',
-      'MARIO [/M]',
+      'MARIO [/M] [/A]',
       '',
       '  /M   No background music (sound effects only)',
+      '  /A   Start with the autopilot switched on',
       '',
       'Keys:',
       '  Left / Right  (or A / D)   walk',
@@ -180,6 +181,7 @@
       '  Z or Space                 jump  (A button, hold to jump higher)',
       '  X or Shift                 run   (B button)',
       '  Enter                      start / pause',
+      '  P                          autopilot on/off (plays the level for you)',
       '  Esc                        quit to DOS',
       '',
       'Original pixel art and music; a fan tribute not affiliated with Nintendo.'

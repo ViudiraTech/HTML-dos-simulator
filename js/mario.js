@@ -90,9 +90,12 @@
       id, def, w, h, grid, contents,
       theme: def.theme || 'overworld',
       multi: new Map(),
-      spawns: (def.enemies || []).map(([kind, x, y]) => ({ kind, x: x * TS, y: y * TS, spawned: false })),
-      get(x, y) { return x < 0 || x >= w || y < 0 || y >= h ? T.EMPTY : grid[y * w + x]; },
-      set
+      // 出生点按 x 排序，spawnIdx 指向下一个待生成的敌人（克隆时只需复制这个整数）
+      spawns: (def.enemies || []).map(([kind, x, y]) => ({ kind, x: x * TS, y: y * TS })).sort((p, q) => p.x - q.x),
+      spawnIdx: 0,
+      // get/set 通过 this.grid 访问，克隆区域时只需复制 grid
+      get(x, y) { return x < 0 || x >= this.w || y < 0 || y >= this.h ? T.EMPTY : this.grid[y * this.w + x]; },
+      set(x, y, t) { if (x >= 0 && x < this.w && y >= 0 && y < this.h) this.grid[y * this.w + x] = t; }
     };
   }
 
@@ -122,7 +125,36 @@
 
     // ---------------- 事件 ----------------
 
-    _emit(type, name, extra) { this.events.push(Object.assign({ type, name }, extra || {})); }
+    _emit(type, name, extra) { if (!this.silent) this.events.push(Object.assign({ type, name }, extra || {})); }
+
+    /**
+     * 深拷贝可变状态，得到一个可独立推进的“前向模型”（供自动驾驶搜索使用）。
+     * 克隆体不产生事件（silent），关卡定义等只读数据共享。
+     * @returns {MarioGame}
+     */
+    clone() {
+      const g = Object.create(MarioGame.prototype);
+      Object.assign(g, this);
+      g.silent = true;
+      g.events = [];
+      g.areas = {};
+      for (const id of Object.keys(this.areas)) {
+        const a = this.areas[id];
+        // grid/multi 与原对象共享，直到克隆体修改图块（见 _mutArea）；contents、spawns 只读
+        g.areas[id] = Object.assign({}, a, { shared: true });
+      }
+      g.area = g.areas[this.area.id];
+      g.mario = Object.assign({}, this.mario);
+      g.enemies = this.enemies.map(e => Object.assign({}, e));
+      g.items = this.items.map(i => Object.assign({}, i));
+      g.effects = [];
+      g.bumps = this.bumps.map(b => Object.assign({}, b));
+      g.flag = this.flag && Object.assign({}, this.flag);
+      g.prev = Object.assign({}, this.prev);
+      g.transform = this.transform && Object.assign({}, this.transform);
+      g.pipe = this.pipe && Object.assign({}, this.pipe);
+      return g;
+    }
     _sfx(name) { this._emit('sfx', name); }
     _music(name, extra) { this._emit('music', name, extra); }
     _announce(text) { this._emit('announce', text); }
@@ -392,8 +424,18 @@
       }
     }
 
+    /** 写时复制：克隆体第一次修改图块前才真正复制当前区域的 grid */
+    _mutArea() {
+      const a = this.area;
+      if (!a.shared) return a;
+      const c = Object.assign({}, a, { grid: a.grid.slice(), multi: new Map(Array.from(a.multi, ([k, v]) => [k, Object.assign({}, v)])), shared: false });
+      this.areas[a.id] = c;
+      this.area = c;
+      return c;
+    }
+
     _hitBlock(tx, ty) {
-      const a = this.area, t = a.get(tx, ty), key = tx + ',' + ty, content = a.contents.get(key);
+      const a = this._mutArea(), t = a.get(tx, ty), key = tx + ',' + ty, content = a.contents.get(key);
       if (t === T.QUESTION || t === T.HIDDEN) {
         a.set(tx, ty, T.USED);
         this._bump(tx, ty);
@@ -462,9 +504,9 @@
     // ---------------- 敌人 ----------------
 
     _spawnEnemies() {
-      for (const s of this.area.spawns) {
-        if (s.spawned || s.x > this.camX + SCREEN_W + 16) continue;
-        s.spawned = true;
+      const a = this.area;
+      while (a.spawnIdx < a.spawns.length && a.spawns[a.spawnIdx].x <= this.camX + SCREEN_W + 16) {
+        const s = a.spawns[a.spawnIdx++];
         if (s.x + 16 < this.camX) continue;
         this.enemies.push({ kind: s.kind, x: s.x, y: s.y, w: 16, h: 16, vx: -this.P.enemySpeed, vy: 0, state: 'walk', timer: 0, grace: 0 });
       }
@@ -600,7 +642,7 @@
       for (let ty = Math.floor(m.y / TS); ty <= Math.floor((m.y + m.h - EPS) / TS); ty++) {
         for (let tx = Math.floor(m.x / TS); tx <= Math.floor((m.x + m.w - EPS) / TS); tx++) {
           if (this.area.get(tx, ty) !== T.COIN) continue;
-          this.area.set(tx, ty, T.EMPTY);
+          this._mutArea().set(tx, ty, T.EMPTY);
           this._addCoin();
           this._addScore(200, false);
           this._sfx('coin');
@@ -811,7 +853,7 @@
           m.y = top * TS;
           m.vx = 0; m.vy = 0;
           this.camX = Math.max(0, Math.min(main.w * TS - SCREEN_W, exit.x * TS - 80));
-          for (const s of main.spawns) if (s.x < this.camX + SCREEN_W) s.spawned = true;
+          while (main.spawnIdx < main.spawns.length && main.spawns[main.spawnIdx].x < this.camX + SCREEN_W) main.spawnIdx++;
           this.pipe = { dir: 'up', t: 0, top };
           this._sfx('pipe');
         }
@@ -962,6 +1004,7 @@
       this.drawWorld(game);
       this.drawHUD(game);
       if (game.state === 'title') this.drawTitle(game);
+      if (game.autopilot && game.state !== 'clear') this.drawAutoBadge(game);
       if (game.state === 'play' && game.paused) {
         g.fillRect(100, 108, 56, 16, this.BLACK);
         g.text('PAUSE', 108, 112, this.WHITE);
@@ -972,6 +1015,16 @@
         if ((game.timer >> 4) % 2 === 0 || game.timer < 30) this.shadowText('PRESS ENTER TO PLAY AGAIN', 28, 112);
         this.shadowText('ESC TO RETURN TO DOS', 48, 128);
       }
+    }
+
+    /** 自动驾驶指示：HUD 下方的黑底徽标，左侧小灯闪烁 */
+    drawAutoBadge(game) {
+      const g = this.g, x = 176, y = 36;
+      g.fillRect(x, y, 64, 11, this.BLACK);
+      g.rect(x, y, 64, 11, this.index.Y);
+      if ((game.frame >> 4) % 2 === 0) g.fillRect(x + 3, y + 4, 3, 3, this.index.R);
+      g.text('AUTO', x + 10, y + 2, this.index.Y);
+      g.text('P', x + 50, y + 2, this.index.z);
     }
 
     drawTitle(game) {
@@ -1178,6 +1231,8 @@
       b: ['KeyX', 'ShiftLeft', 'ShiftRight'],
       start: ['Enter', 'NumpadEnter']
     },
+    /** 自动驾驶开关键 */
+    AUTO_KEY: 'KeyP',
 
     loadHiscore(m) {
       try { return +((m.storage && m.storage.getItem(HISCORE_KEY)) || 0) || 0; } catch (e) { return 0; }
@@ -1200,7 +1255,17 @@
       const renderer = new MarioRenderer(m.gfx);
       renderer.setupPalette();
       const game = new MarioGame({ hiscore: this.loadHiscore(m) });
+      const pilot = new DOS.MarioAutoPilot();
       this.current = game; // 调试句柄（浏览器控制台：DOS.MarioProgram.current）
+      this.pilot = pilot;
+      game.autopilot = sw.A !== undefined;
+      const toggleAuto = () => {
+        game.autopilot = !game.autopilot;
+        pilot.reset();
+        Audio.sfx(game.autopilot ? 'oneup' : 'bump');
+        m.announce(game.autopilot ? 'Autopilot on.' : 'Autopilot off.');
+      };
+      this.toggleAuto = toggleAuto; // 供页面 HUD 上的开关调用
       m.announce('MARIO started. Press Enter to start, Escape to quit.');
       const STEP = 1000 / 60;
       let acc = 0;
@@ -1231,6 +1296,7 @@
           let ev;
           while ((ev = m.input.pollKey())) {
             if (ev.key === 'Escape' || ev.key === 'Break') quit = true;
+            else if (ev.code === this.AUTO_KEY) toggleAuto();
             if (ev.code) tapped.add(ev.code);
           }
           if (m.breakFlag) quit = true;
@@ -1238,7 +1304,13 @@
           for (const k of Object.keys(this.KEYS)) input[k] = down(k);
           let steps = 0;
           while (acc >= STEP && steps < 5) {
-            game.step(input);
+            // 自动驾驶接管方向/跳/跑；Enter（暂停）仍由玩家控制
+            let frameInput = input;
+            if (game.autopilot) {
+              frameInput = pilot.next(game);
+              if (input.start) frameInput.start = true;
+            }
+            game.step(frameInput);
             acc -= STEP;
             steps++;
             handleEvents();
@@ -1251,6 +1323,8 @@
         }
       } finally {
         this.current = null;
+        this.pilot = null;
+        this.toggleAuto = null;
         Audio.stopMusic();
         game.hiscore = Math.max(game.hiscore, game.score);
         this.saveHiscore(m, game.hiscore);
