@@ -47,6 +47,7 @@
       this.outStack = [];
       this.stdin = null;
       this.programRunning = false;
+      this.booting = false;
       /** 回调（由 main.js 设置） */
       this.onDisplayChange = null;
       this.onSettingsChange = null;
@@ -435,6 +436,7 @@
     async post() {
       const t = this.term;
       const state = { skip: false };
+      this.booting = true; // 触屏界面据此把“点按屏幕”当作 Esc（跳过自检）
       t.clear();
       t.cursorVisible = false;
       const now = this.now();
@@ -474,6 +476,7 @@
       t.gotoXY(0, 23);
       t.write(` ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}/${now.getFullYear()}-i486-HTMLDOS-1.00     Press ESC to skip, DEL to enter SETUP`);
       await this._postDelay(900, state);
+      this.booting = false;
       this.input.flush();
       t.cursorVisible = true;
     }
