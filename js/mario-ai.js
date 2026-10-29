@@ -37,6 +37,14 @@
   const PARTIAL_MAX = 32;
   const MIN_PARTIAL = 4;
   const DEEPEN = 3;            // 搜不到时加深一次的预算倍数
+  const TRAJ_FRAMES = 240;     // 预测道具轨迹的帧数
+  const FLAG_TOP_Y = 64;       // 抓旗时脚的高度低于这个 y（像素）才是 5000 分（与 MarioGame._grabFlag 一致）
+  const FLAG_TOP_RANGE = 24;
+  const FLAG_TOP_NEAR = 136;
+  const JUMP_REACH = 56;
+  const FLAG_TOP_SOLVE = 240;  // 离旗杆这么近时用 FLAG_DEEPEN 倍预算一次性解出 5000 分的跳法
+  const FLAG_DEEPEN = 8;
+  const FLAG_TRIES = 4;       // 起跳能把脚抬高的距离（保守估计，像素）   // 离旗杆这么近时，脚必须已经在高处（站在最高一级台阶上或在空中）   // 离旗杆这么多图块以内开始瞄准旗杆顶端
   const EXTEND_BUDGET = 2.5;   // 一次计划延伸（可能含多次搜索）的总时间上限 = 单次预算 × 这个倍数      // 没搜到子目标时只采纳部分计划的前这么多帧（滚动时域），避免带着惯性冲过头
 
   /** 基本动作集（与 MarioGame.step 的输入格式一致） */
@@ -60,12 +68,12 @@
    * human = 拟人行为；runCost = 按住 B 的额外代价/帧；safety = 受伤惩罚倍数；flagTop = 追求高处抓旗杆。
    */
   const PERSONAS = {
-    allround: { name: 'ALL-ROUND', zh: '全能', desc: 'Plays like a person: grabs blocks, power-ups and the hidden 1UP, stomps what is in the way, walks when there is no hurry', coin: 110, block: 80, item: 420, oneup: 700, star: 260, stomp: 90, kick: 140, secret: 300, coinTile: 50, human: true, runCost: 0.2, safety: 1, flagTop: 0.5 },
-    speedrun: { name: 'SPEEDRUN', zh: '速通', desc: 'Ignores everything and races to the flag', coin: 0, block: 0, item: 0, oneup: 0, star: 0, stomp: 0, kick: 0, secret: 0, coinTile: 0, human: false, runCost: 0, safety: 1, flagTop: 1 },
-    collector: { name: 'COLLECTOR', zh: '收集者', desc: 'Coins first: every ? block, coin bricks and the bonus room', coin: 260, block: 160, item: 520, oneup: 700, star: 220, stomp: 0, kick: 0, secret: 600, coinTile: 150, human: true, runCost: 0.2, safety: 1.5, flagTop: 0.5 },
-    hunter: { name: 'HUNTER', zh: '猎手', desc: 'Goes after enemies: stomps goombas, kicks shells, wants the star', coin: 30, block: 30, item: 300, oneup: 300, star: 900, stomp: 600, kick: 700, secret: 0, coinTile: 20, human: true, runCost: 0.1, safety: 1, flagTop: 0.3 },
-    explorer: { name: 'EXPLORER', zh: '探索者', desc: 'Looks for secrets: the warp pipe to the bonus room and hidden blocks', coin: 80, block: 150, item: 360, oneup: 700, star: 300, stomp: 40, kick: 60, secret: 1000, coinTile: 90, human: true, runCost: 0.2, safety: 1.5, flagTop: 0.3 },
-    cautious: { name: 'CAUTIOUS', zh: '稳健', desc: 'Plays it safe: never hunts enemies or secrets, walks instead of running, guards its power-up', coin: 50, block: 50, item: 520, oneup: 400, star: 260, stomp: 0, kick: 0, secret: 0, coinTile: 40, human: true, runCost: 0.6, safety: 4, flagTop: 0 }
+    allround: { name: 'ALL-ROUND', zh: '全能', desc: 'Plays like a person: grabs blocks, power-ups and the hidden 1UP, stomps what is in the way, walks when there is no hurry', coin: 110, block: 80, item: 420, oneup: 700, star: 260, stomp: 90, kick: 140, secret: 300, coinTile: 50, human: true, runCost: 0.2, safety: 1, flagTop: 1 },
+    speedrun: { name: 'SPEEDRUN', zh: '速通', desc: 'Races to the flag; only grabs a mushroom that is on the way', coin: 0, block: 0, item: 250, oneup: 0, star: 0, stomp: 0, kick: 0, secret: 0, coinTile: 0, human: false, runCost: 0, safety: 1, flagTop: 1 },
+    collector: { name: 'COLLECTOR', zh: '收集者', desc: 'Coins first: every ? block, coin bricks and the bonus room', coin: 260, block: 160, item: 520, oneup: 700, star: 220, stomp: 0, kick: 0, secret: 600, coinTile: 150, human: true, runCost: 0.2, safety: 1.5, flagTop: 1 },
+    hunter: { name: 'HUNTER', zh: '猎手', desc: 'Goes after enemies: stomps goombas, kicks shells, wants the star', coin: 30, block: 30, item: 300, oneup: 300, star: 900, stomp: 600, kick: 700, secret: 0, coinTile: 20, human: true, runCost: 0.1, safety: 1, flagTop: 1 },
+    explorer: { name: 'EXPLORER', zh: '探索者', desc: 'Looks for secrets: the warp pipe to the bonus room and hidden blocks', coin: 80, block: 150, item: 360, oneup: 700, star: 300, stomp: 40, kick: 60, secret: 1000, coinTile: 90, human: true, runCost: 0.2, safety: 1.5, flagTop: 1 },
+    cautious: { name: 'CAUTIOUS', zh: '稳健', desc: 'Plays it safe: never hunts enemies or secrets, walks instead of running, guards its power-up', coin: 50, block: 50, item: 520, oneup: 400, star: 260, stomp: 0, kick: 0, secret: 0, coinTile: 40, human: true, runCost: 0.6, safety: 4, flagTop: 1 }
   };
   const PERSONA_ORDER = ['allround', 'speedrun', 'collector', 'hunter', 'explorer', 'cautious'];
 
@@ -139,6 +147,7 @@
       this.target = null;
       this.blacklist = new Set();
       this.deadline = Infinity;
+      this.flagTries = 0;
       this.targetFrames = 0;
       this.stats = { searches: 0, nodes: 0, lastNodes: 0, lastMs: 0, reachedHorizon: 0, replans: 0, goals: 0, idles: 0 };
       this.setPersona(opts.persona || 'allround');
@@ -148,7 +157,7 @@
     setPersona(id) {
       this.personaId = PERSONAS[id] ? id : 'allround';
       this.persona = PERSONAS[this.personaId];
-      this.blacklist.clear();
+      this.blacklist.clear(); this.flagTries = 0;
       this.reset();
     }
 
@@ -173,9 +182,9 @@
      * @returns {object} 输入 {left,right,up,down,a,b,start}
      */
     next(game) {
-      if (game.state === 'title') { this.blacklist.clear(); return { start: game.frame % 2 === 0 }; }
+      if (game.state === 'title') { this.blacklist.clear(); this.flagTries = 0; return { start: game.frame % 2 === 0 }; }
       if (game.state !== 'play' || game.paused) {
-        if (game.state === 'dying' || game.state === 'intro') this.blacklist.clear();
+        if (game.state === 'dying' || game.state === 'intro') this.blacklist.clear(); this.flagTries = 0;
         this.reset();
         return {};
       }
@@ -252,7 +261,15 @@
     _finalTarget(g) {
       const def = g.area.def;
       if (def.sidePipe) return { type: 'exit', x: def.sidePipe.x * 16, y: (def.sidePipe.y + 1) * 16, tx: def.sidePipe.x, ty: def.sidePipe.y, label: 'EXIT PIPE', area: g.area.id };
-      if (def.flag) return { type: 'flag', x: def.flag.x * 16 + 8, y: def.flag.top * 16, tx: def.flag.x, ty: def.flag.top, label: 'FLAG', area: g.area.id };
+      if (def.flag) {
+        const f = { type: 'flag', x: def.flag.x * 16 + 8, y: def.flag.top * 16, tx: def.flag.x, ty: def.flag.top, label: 'FLAG', area: g.area.id };
+        // 接近终点时先瞄准旗杆顶端（5000 分）；够不着（被拉黑）再随便抓
+        if (this.persona.flagTop && g.mario.x >= (def.flag.x - FLAG_TOP_RANGE) * 16) {
+          const top = Object.assign({}, f, { type: 'flagtop', label: 'FLAG TOP 5000' });
+          if (this._valid(g, top)) return top;
+        }
+        return f;
+      }
       return { type: 'flag', x: g.area.w * 16, y: GROUND_Y, label: 'GOAL', area: g.area.id };
     }
 
@@ -260,6 +277,11 @@
     _valid(g, t) {
       if (!t || t.area !== g.area.id) return false;
       if (t.type === 'flag' || t.type === 'exit') return true;
+      if (t.type === 'flagtop') {
+        // 已经贴近旗杆却还在低处（下了台阶），就不可能再抓到顶端了
+        const m = g.mario;
+        return !this.blacklist.has(this._key(t)) && g.state === 'play' && (m.x + m.w < t.x - FLAG_TOP_NEAR || m.y + m.h <= FLAG_TOP_Y + 48);
+      }
       if (t.x < g.camX + 4) return false;
       if (this.blacklist.has(this._key(t))) return false;
       const T = DOS.MarioTiles;
@@ -300,6 +322,7 @@
     _reached(t, g, rootSig, rootStats) {
       switch (t.type) {
         case 'flag': return g.state === 'flag';
+        case 'flagtop': return g.state === 'flag' && g.stats.flag >= 5000;
         case 'exit': return (g.state === 'pipe' && g.pipe && g.pipe.dir === 'right') || g.area.id !== t.area;
         case 'pipe': return (g.state === 'pipe' && g.pipe && g.pipe.dir === 'down') || g.area.id !== t.area;
         case 'block': return g.area.id === t.area && this._blockSig(g, t) !== rootSig;
@@ -365,13 +388,54 @@
       return m.y;
     }
 
-    /** 到子目标的估计帧数 */
-    _heuristic(g, t) {
+    /**
+     * 道具的未来轨迹：只推进道具本身（蘑菇沿砖块走、掉下、撞水管折返都是确定的），
+     * 让启发式按“拦截点”估计，而不是追着它当前的位置跑。
+     */
+    _itemTrajectory(game, id) {
+      const s = game.clone(), out = [];
+      for (let k = 0; k <= TRAJ_FRAMES; k++) {
+        const it = s.items.find(i => i.id === id);
+        if (!it) break;
+        out.push({ x: it.x + 8, y: it.y });
+        s._updateItems();
+      }
+      return out;
+    }
+
+    /**
+     * 到子目标的估计帧数。
+     * @param {object} g 节点状态
+     * @param {object} t 子目标
+     * @param {object} [ctx] 搜索上下文（道具轨迹）
+     * @param {number} [time] 节点距搜索起点的帧数（查轨迹用）
+     */
+    _heuristic(g, t, ctx, time) {
       const m = g.mario, P = g.P;
       if (g.area.id !== t.area) return 0;
-      if (t.type === 'flag' || t.type === 'exit') {
-        const reach = t.type === 'flag' ? m.x + m.w : m.x + m.w;
-        return this._timeToCover(Math.max(0, t.x - reach), m.vx, P) + this._climb(g) / CLIMB_SPEED;
+      if (t.type === 'flag' || t.type === 'flagtop' || t.type === 'exit') {
+        let h = this._timeToCover(Math.max(0, t.x - (m.x + m.w)), m.vx, P) + this._climb(g) / CLIMB_SPEED;
+        // 5000 分要求抓在旗杆最上段（脚高于 FLAG_TOP_Y）：先得站到足够高的地方（台阶顶），
+        // 再从那里起跳。已经在高空时按当前高度算，否则按落脚点高度减去一次起跳能升高的距离。
+        if (t.type === 'flagtop') {
+          const high = !m.onGround && m.y + m.h <= FLAG_TOP_Y + 48;
+          h += high ? Math.max(0, m.y + m.h - FLAG_TOP_Y) / CLIMB_SPEED
+            : Math.max(0, this._standY(g) + m.h - FLAG_TOP_Y - JUMP_REACH) / CLIMB_SPEED;
+        }
+        return h;
+      }
+      const traj = ctx && ctx.traj;
+      if (t.type === 'item' && traj && traj.length) {
+        // 拦截：最早的 k，使马里奥能在 k 帧内够到道具 k 帧后的位置
+        const cx = m.x + m.w / 2, cy = m.y + m.h / 2;
+        for (let k = 0; ; k += 2) {
+          const i = Math.min(traj.length - 1, (time || 0) + k), p = traj[i];
+          const dx = p.x - cx, dir = Math.sign(dx) || 1;
+          const hx = this._timeToCover(Math.max(0, Math.abs(dx) - 12), m.vx * dir, P);
+          const hy = Math.max(0, Math.abs(p.y + 8 - cy) - m.h / 2 - 6) / CLIMB_SPEED;
+          const need = Math.max(hx, hy);
+          if (need <= k || i === traj.length - 1) return Math.max(k, need);
+        }
       }
       const pos = this._targetPos(g, t);
       const dx = pos.x - (m.x + m.w / 2);
@@ -393,9 +457,7 @@
       const g = node.state, m = g.mario;
       if (this._reached(ctx.target, g, ctx.rootSig, ctx.rootStats)) {
         node.goal = true;
-        let bonus = 0;
-        if (ctx.target.type === 'flag') bonus = Math.max(0, (12 * 16 - (m.y + m.h)) / 4) * this.persona.flagTop; // 抓得越高越好
-        node.f = node.t * this.weight + node.extra - bonus;
+        node.f = node.t * this.weight + node.extra;
         return;
       }
       const falling = !m.onGround && m.y + m.h > GROUND_Y + 2 && g.state === 'play';
@@ -404,7 +466,34 @@
       }
       const damaged = (ctx.startBig && !m.big) || (g.state === 'transform' && g.transform && g.transform.kind === 'shrink');
       // 启发式按“跑步”估计帧数；人格给跑步加了额外代价，启发式也要同比放大，否则走/跑两类分支会被同等展开
-      node.f = node.t * this.weight + node.extra + this._heuristic(g, ctx.target) * (1 + this.persona.runCost) + (damaged ? DAMAGE_PENALTY * this.persona.safety : 0);
+      node.f = node.t * this.weight + node.extra + this._heuristic(g, ctx.target, ctx, node.t) * (1 + this.persona.runCost) + (damaged ? DAMAGE_PENALTY * this.persona.safety : 0);
+    }
+
+    /** 站在足够高的平台上（从这里起跳有机会抓到旗杆顶端） */
+    _onHighGround(g) {
+      return g.state === 'play' && g.mario.onGround && g.mario.y + g.mario.h <= FLAG_TOP_Y + JUMP_REACH + 24;
+    }
+
+    /**
+     * 旗杆顶端的“宏动作”求解：从高台上枚举 先后退 k 帧 → 助跑 n 帧 → 按住跳跃冲向旗杆 的脚本，
+     * 用前向模型逐个验证，返回第一个拿到 5000 分的输入序列（速通玩家也是这么练的固定跳法）。
+     * @returns {object[]|null}
+     */
+    _flagTopScript(state) {
+      if (!this._onHighGround(state)) return null;
+      const L = { left: true }, R = { right: true, b: true }, J = { right: true, b: true, a: true };
+      for (let k = 0; k <= 28; k += 4) {
+        for (let n = 0; n <= 60; n++) {
+          const s = state.clone(), inputs = [];
+          for (let i = 0; i < 150 && s.state === 'play'; i++) {
+            const inp = i < k ? L : i < k + n ? R : J;
+            inputs.push(inp);
+            s.step(inp);
+          }
+          if (s.state === 'flag' && s.stats.flag >= 5000) return inputs;
+        }
+      }
+      return null;
     }
 
     /** 粗略的生存检查：几种简单的后续操作中至少有一种能安全撑过 SAFE_TAIL 帧 */
@@ -457,7 +546,8 @@
         target,
         startBig: game.mario.big,
         rootSig: target.type === 'block' ? this._blockSig(game, target) : null,
-        rootStats: Object.assign({}, game.stats)
+        rootStats: Object.assign({}, game.stats),
+        traj: target.type === 'item' ? this._itemTrajectory(game, target.id) : null
       };
       const root = { state: game.clone(), parent: null, action: null, t: 0, extra: 0, f: 0, deep: 0 };
       this._evaluate(root, ctx);
@@ -499,7 +589,7 @@
         }
         if (node.goal) {
           // 达成子目标后还得活得下去（比如踩完敌人别落进另一群敌人中间）
-          if (target.type === 'flag' || target.type === 'exit' || target.type === 'pipe' || this._survives(node.state, ctx)) { best = node; break; }
+          if (target.type === 'flag' || target.type === 'flagtop' || target.type === 'exit' || target.type === 'pipe' || this._survives(node.state, ctx)) { best = node; break; }
           continue;
         }
         const g = node.state, m = g.mario;
@@ -588,29 +678,53 @@
         this.blacklist.add(this._key(this.target));
         this.target = null;
       }
-      const target = this._chooseTarget(end);
+      let target = this._chooseTarget(end);
       if (!this.target || this._key(target) !== this._key(this.target)) this.targetFrames = 0;
       this.target = target;
-      const sub = target.type !== 'flag' && target.type !== 'exit';
+      let sub = target.type !== 'flag' && target.type !== 'exit';
       // 从计划末尾延伸时要求至少 minPlan 帧；从真实状态重规划时，短一点的安全前缀也可以接受
       const usable = (r, min) => r.ok || (r.safe && r.plan.length >= min);
+      if (target.type === 'flagtop' && target.x - end.mario.x < FLAG_TOP_SOLVE) {
+        const script = this._flagTopScript(end);
+        if (script) return this._commit(end, { plan: script, ok: true, goal: true });
+        // 旗杆顶端是一次性的精确跳跃：离得够近时一次性用大预算搜到底（只在关底发生一次），
+        // 搜到就整段执行，搜不到就放弃 5000 分改为普通抓旗
+        this.deadline = now() + this.budgetMs * FLAG_DEEPEN;
+        const rt = this.search(end, target, FLAG_DEEPEN);
+        if (rt.goal) return this._commit(end, rt);
+        // 最多试 FLAG_TRIES 次（每次之间照常向前推进一小段），仍不行就放弃
+        if (++this.flagTries >= FLAG_TRIES) {
+          this.blacklist.add(this._key(target));
+          return this._extendPlan(game);
+        }
+        this.deadline = now() + this.budgetMs * EXTEND_BUDGET;
+      }
       let r = this.search(end, target);
       if (usable(r, this.minPlan)) return this._commit(end, r);
+      if (sub) {
+        // 加深一次：用 DEEPEN 倍的节点/时间预算再搜（跳上高水管、拦截移动的蘑菇这类难动作）
+        r = this.search(end, target, DEEPEN);
+        if (usable(r, MIN_PARTIAL)) return this._commit(end, r);
+      }
       if (end !== game) {
-        // 从计划末尾搜不到：丢掉剩余计划，从当前真实状态再试（多出几帧回旋余地，比如提前刹车）
+        // 从计划末尾搜不到：丢掉剩余计划，从当前真实状态重新选目标再试（多出几帧回旋余地，比如提前刹车）。
+        // 目标可能只存在于预测的未来（例如还没顶出来的蘑菇），这时要重新选——多半又会先去顶那个方块
         this.stats.replans++;
         this.plan = [];
         this.path = [];
         end = game;
-        if (!sub || this._valid(game, target)) {
-          r = this.search(game, target);
+        if (!this._valid(game, target)) {
+          target = this._chooseTarget(game);
+          if (!this.target || this._key(target) !== this._key(this.target)) this.targetFrames = 0;
+          this.target = target;
+          sub = target.type !== 'flag' && target.type !== 'exit';
+        }
+        r = this.search(game, target);
+        if (usable(r, MIN_PARTIAL)) return this._commit(game, r);
+        if (sub) {
+          r = this.search(game, target, DEEPEN);
           if (usable(r, MIN_PARTIAL)) return this._commit(game, r);
         }
-      }
-      if (!sub || this._valid(end, target)) {
-        // 加深一次：用 DEEPEN 倍的节点/时间预算再搜（偶尔一帧的停顿，换来跳上高水管这类难动作）
-        r = this.search(end, target, DEEPEN);
-        if (usable(r, MIN_PARTIAL)) return this._commit(end, r);
       }
       if (sub) {
         // 这个子目标暂时够不着：拉黑，本轮先朝终点走
@@ -618,14 +732,23 @@
         this.target = this._finalTarget(end);
         this.targetFrames = 0;
         r = this.search(end, this.target);
-        if (!usable(r, MIN_PARTIAL)) r = this.search(end, this.target, DEEPEN);
       }
+      if (!usable(r, MIN_PARTIAL)) r = this.search(end, this.target, DEEPEN);
       this._commit(end, r);
     }
 
     /** 采纳搜索结果：达成子目标的完整采纳；部分计划只取开头一段（滚动时域） */
     _commit(state, r) {
-      const after = this._append(state, r.ok ? r.plan : r.plan.slice(0, PARTIAL_MAX));
+      let plan = r.ok ? r.plan : r.plan.slice(0, PARTIAL_MAX);
+      if (!r.ok && this.target && this.target.type === 'flagtop') {
+        // 去旗杆顶端的部分计划：一踏上高台就停下，让下一次延伸用起跳脚本求解
+        const s = state.clone();
+        for (let i = 0; i < plan.length; i++) {
+          s.step(plan[i]);
+          if (i >= 1 && this._onHighGround(s)) { plan = plan.slice(0, i + 1); break; }
+        }
+      }
+      const after = this._append(state, plan);
       if (r.goal) {
         this.stats.goals++;
         this._maybeIdle(after);
@@ -661,6 +784,7 @@
           if (e) { const tall = e.kind === 'koopa' && e.state === 'walk'; box = { x: e.x, y: tall ? e.y - 8 : e.y, w: 16, h: tall ? 24 : 16 }; }
         } else if (t.type === 'pipe') box = { x: t.tx * 16, y: t.ty * 16, w: 32, h: 16 };
         else if (t.type === 'flag') box = { x: t.tx * 16 + 4, y: t.ty * 16, w: 8, h: (12 - t.ty) * 16 };
+        else if (t.type === 'flagtop') box = { x: t.tx * 16 + 4, y: t.ty * 16, w: 8, h: FLAG_TOP_Y - t.ty * 16 };
         else if (t.type === 'exit') box = { x: t.tx * 16, y: t.ty * 16, w: 16, h: 32 };
         else box = { x: t.tx * 16, y: t.ty * 16, w: 16, h: 16 };
         if (box) target = Object.assign(box, { label: t.label });

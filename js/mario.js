@@ -180,10 +180,10 @@
     /**
      * 行为统计（单调递增），供自动驾驶判断子目标是否达成、HUD 显示。
      * coins 金币、blocks 顶出内容的方块、bricks 顶碎的砖、items 吃到的道具、
-     * stomps 踩踏、kicks 踢壳、kills 用壳/星星/顶砖击杀、secrets 隐藏方块与奖励房
+     * stomps 踩踏、kicks 踢壳、kills 用壳/星星/顶砖击杀、secrets 隐藏方块与奖励房、flag 抓旗得分
      */
     resetStats() {
-      this.stats = { coins: 0, blocks: 0, bricks: 0, items: 0, stomps: 0, kicks: 0, kills: 0, secrets: 0 };
+      this.stats = { coins: 0, blocks: 0, bricks: 0, items: 0, stomps: 0, kicks: 0, kills: 0, secrets: 0, flag: 0 };
     }
 
     /** 开始新游戏 */
@@ -912,6 +912,7 @@
       const yb = m.y + m.h;
       const pts = yb < 64 ? 5000 : yb < 96 ? 2000 : yb < 128 ? 800 : yb < 160 ? 400 : 100;
       this._addScore(pts, false);
+      this.stats.flag = pts;
       this.effects.push({ kind: 'flagscore', text: String(pts), x: f.x * TS + 12, y: 12 * TS, t: 0 });
       f.stage = 'slide';
       f.timer = 0;
